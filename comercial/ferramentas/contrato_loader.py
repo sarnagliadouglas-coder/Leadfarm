@@ -416,7 +416,7 @@ def psi_estado(lead: "LeadQualificado") -> str:
             f"lead['psi'] tem forma inesperada: {psi!r}. Esperado None, "
             f"{{'estado': '{ESTADO_NAO_VERIFICADO}', ...}} ou "
             f"{{'estado': '{ESTADO_CONFIRMADO_PRESENTE}', ...}} — ver "
-            f"referencias/insumos_sistema_qualificacao.md, seção 'psi'."
+            f"EQC/contracts/CONTRACT.md, campo 'psi'."
         )
     return psi["estado"]
 

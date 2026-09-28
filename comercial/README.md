@@ -1,75 +1,76 @@
-# COMERCIAL — primeira mensagem de prospecção
+# COMERCIAL — first outreach message
 
-O COMERCIAL recebe os leads já qualificados pelo QUALIFICADOR e produz uma
-**planilha de envio**: para cada lead, o argumento (ângulo) mais adequado, a
-primeira mensagem pronta e o canal para enviá-la. O envio é feito à mão, pelo
-vendedor. Depois, um comando registra quem foi contatado, para que as próximas
-planilhas deixem essas pessoas de fora.
+The COMERCIAL module takes the leads already qualified by the QUALIFICADOR and turns
+them into an **outreach sheet**: for each lead, the most relevant angle, a ready-to-send
+first message and the channel to send it through. Messages are sent by hand, a few per
+day — never in bulk. Afterwards, one command logs who was contacted, so future sheets
+leave them out.
 
-A primeira mensagem **não usa IA**: o ângulo é escolhido por regra e o texto vem
-de modelos fixos, editáveis sem mexer no código.
+The first message **does not use an LLM**: the angle is chosen by explicit rules and the
+text comes from fixed templates that can be edited without touching the code.
 
-## Fluxo
+## Flow
 
 ```
-contrato JSON + CSV do QUALIFICADOR
-  → contrato_loader    (valida contra o schema e trava a versão do contrato)
-  → angulo_mensagem    (escolhe o ângulo por regra e monta a mensagem do modelo)
-  → validador_mensagem (recusa o que afirma algo não medido)
-  → planilha_envio     (.xlsx: abas Geral, Nata e Como usar)
-  → registro_abordagens (depois dos envios: quem foi contatado ou pulado)
+JSON hand-off + human CSV from the QUALIFICADOR
+  → contrato_loader     (validates against the JSON Schema, pins the contract version)
+  → angulo_mensagem     (picks the angle by rule, fills the template)
+  → validador_mensagem  (rejects anything that asserts what was not measured)
+  → planilha_envio      (.xlsx with three tabs: Geral, Nata, Como usar)
+  → registro_abordagens (after sending: who was contacted or skipped)
 ```
 
-## Como o ângulo é escolhido
+## How the angle is chosen
 
-- **Leads com site próprio:** o primeiro ângulo em que o lead se encaixa —
-  contato difícil no celular, poucas avaliações em comparação com um concorrente
-  da mesma busca, ou site lento no celular. Sem ângulo, sem mensagem.
-- **Leads sem site próprio** (nenhum site, portal, rede social, construtor
-  gratuito): um modelo para cada situação.
+- **Leads with their own website:** the first angle the lead fits — contact is hard on a
+  phone, few reviews compared with a competitor from the same search, or a slow site on
+  mobile. No angle, no message.
+- **Leads without their own website** (none, a directory portal, a social network, a
+  free site builder): one template per situation.
 
-Cada mensagem segue a estrutura *fato medido → consequência plausível → pergunta
-ou oferta pequena*. Um validador determinístico bloqueia, entre outras coisas,
-número que não veio da medição, preço, link, nome do negócio e frase que afirma
-um resultado não medido. A frase de abertura é testada em duas variantes (A/B),
-com o mesmo corpo de mensagem.
+Every message follows *measured fact → plausible consequence → small question or
+ready-made offer*. A deterministic validator blocks, among other things, any number that
+did not come from a measurement, prices, links, the business name, and sentences that
+state an unmeasured outcome ("you are losing patients") rather than a hedged one ("this
+can add friction"). The opening line is A/B-tested in two variants with an identical
+message body, balanced by angle and channel.
 
-## Como rodar
+## Running it
 
 ```bash
-# gerar a planilha de envio a partir do lote mais recente do QUALIFICADOR
-python ferramentas/planilha_envio.py --saida-dir "<pasta de saída>"
+# build the outreach sheet from the latest QUALIFICADOR batch
+python ferramentas/planilha_envio.py --saida-dir "<output folder>"
 
-# depois dos envios: registrar quem foi contatado
-python ferramentas/registro_abordagens.py "<planilha preenchida>"
+# after sending: log who was contacted
+python ferramentas/registro_abordagens.py "<filled-in sheet>"
 
-# conferir se algum envio ainda não foi registrado (só lê)
-python ferramentas/pendencias_registro.py "<planilha preenchida>"
+# check whether any sent message is still missing from the log (read-only)
+python ferramentas/pendencias_registro.py "<filled-in sheet>"
 ```
 
-A localização do contrato é resolvida automaticamente; variáveis opcionais em
+The contract location is resolved automatically; optional variables are listed in
 [`.env.example`](.env.example).
 
-## Estrutura
+## Layout
 
 ```
 comercial/
-├── config/        textos das mensagens, regras de ângulo e listas do validador (JSON)
-├── ferramentas/   código (Python)
-├── prompts/       prompt de uma versão com IA, fora do fluxo atual
-└── tests/         suíte pytest
+├── config/        message templates, angle rules and validator word lists (JSON)
+├── ferramentas/   code (Python)
+├── prompts/       prompt for an LLM-written variant, not used in the current flow
+└── tests/         pytest suite
 ```
 
-`ferramentas/llm_cliente.py`, `pipeline_estrategia_mensagem.py` e peças
-relacionadas são uma versão da mensagem escrita por IA, **fora do fluxo atual**:
-o teste mostrou que o que decide é o argumento, não quem escreve.
+`ferramentas/llm_cliente.py`, `pipeline_estrategia_mensagem.py` and related pieces are an
+LLM-written version of the message, **outside the current flow**: testing showed that the
+angle matters, not who writes the sentence.
 
-## Testes
+## Tests
 
 ```bash
 python -m pytest -q
 ```
 
-Todos os dados de leads em testes e exemplos são **fictícios** (por exemplo,
-"Fisioficticia Salud", telefone `+34 600 000 000`). Dados reais — lotes,
-planilhas, registro de abordagens — ficam fora do repositório.
+Every lead in tests and examples is **fictitious** (e.g. "Fisioficticia Salud", phone
+`+34 600 000 000`). Real data — batches, sheets, the contact log — stays off this
+repository.

@@ -764,9 +764,9 @@ def test_integracao_psi_dois_estados_reais_lote_real():
     de medição completa tem chaves adicionais (`performance_score`, `lcp_ms`,
     `estrategia`, `origem`, `tentativas`, `rodadas`, `falha_transiente`...) e
     nenhuma chave `valor`; o objeto `NAO_VERIFICADO` tem `motivo`/`medido_em`
-    além de `estado`. Ver agents/01_investigacao/agent.md e
-    referencias/insumos_sistema_qualificacao.md, seção "psi", para a
-    divergência documentada a partir deste teste.
+    além de `estado`. Ver `EQC/contracts/CONTRACT.md`, campo `psi`. (A
+    divergência documentada a partir deste teste vivia em documentos da
+    esteira A1–A4, arquivados em 28/09/2026.)
 
     O QUE MUDOU (23/09/2026, adaptação ao contrato 2.0.0): CONTRACT.md §
     "Princípios do contrato" fechou o terceiro estado -- "leads sem site

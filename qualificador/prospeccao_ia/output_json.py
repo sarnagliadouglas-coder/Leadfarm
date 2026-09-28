@@ -96,7 +96,7 @@ def _contato(emp):
         "email": _campo_verificado(email),
         "instagram": _campo_verificado(insta),
         "facebook": _campo_verificado(face),
-        # contract_version 1.1.0: só transporte de evidência para o A1 do COMERCIAL.
+        # contract_version 1.1.0: só transporte de evidência para o COMERCIAL.
         # NÃO entra em whatsapp_apto nem em nenhum score.
         "linkedin": _campo_verificado(emp.get("linkedin")),
         "whatsapp_apto": whatsapp_apto,

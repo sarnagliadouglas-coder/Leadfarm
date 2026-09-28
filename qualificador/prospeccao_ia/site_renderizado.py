@@ -1,5 +1,5 @@
 """Medicao do site COM JavaScript renderizado (Etapa C, passo C2). Copia do nucleo de
-comercial/ferramentas/fetch_tecnico.py (o original NAO foi alterado nem movido), mais as regras
+comercial/ferramentas/fetch_tecnico.py (o original foi aposentado em 28/09/2026 e esta no backup), mais as regras
 que ele nao tem. Quem o chama e main.fase_render (passo C4), DESLIGADA por padrao (RENDER_ENABLED).
 
 Verificacao comportamental por dispositivo (mobile/desktop): presenca estrutural de formulario,

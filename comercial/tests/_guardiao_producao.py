@@ -9,10 +9,9 @@ QUALIFICADOR). O conteúdo é intencionalmente idêntico -- é infraestrutura de
 lógica de negócio de um módulo específico.
 
 Motivo de existir: `_isolar_persistencia_de_dados`-like isolamento por ENUMERAÇÃO (cada
-teste que grava dossiê/diagnóstico redireciona `COMERCIAL_A1_OUTPUT_DIR`/
-`COMERCIAL_A2_OUTPUT_DIR` pra `tmp_path` manualmente) depende de todo teste novo lembrar de
-fazer isso. A checagem de 23/09/2026 (Etapa D, fechamento — passo D8) não achou nenhum
-vazamento hoje na suíte do COMERCIAL, mas o mesmo tipo de lacuna que vazou no QUALIFICADOR
+teste que grava uma saída redireciona o caminho dela pra `tmp_path` manualmente) depende de
+todo teste novo lembrar de fazer isso. A checagem de 23/09/2026 (Etapa D, fechamento — passo
+D8) não achou nenhum vazamento hoje na suíte do COMERCIAL, mas o mesmo tipo de lacuna que vazou no QUALIFICADOR
 (saída humana nova, D6) pode se repetir aqui com uma saída futura. Este módulo é a rede que
 pega isso sem depender de ninguém lembrar.
 """
@@ -56,7 +55,6 @@ def diferencas(antes, depois):
 def mensagem_de_falha(linhas):
     return (
         "A suíte escreveu, apagou ou alterou arquivo(s) em pasta(s) de PRODUÇÃO, fora do "
-        "isolamento por tmp_path -- provavelmente uma saída nova (dossiê/diagnóstico/outro) "
-        "que algum teste esqueceu de redirecionar via COMERCIAL_A1_OUTPUT_DIR/"
-        "COMERCIAL_A2_OUTPUT_DIR/etc.:\n" + "\n".join(linhas)
+        "isolamento por tmp_path -- provavelmente uma saída nova que algum teste "
+        "esqueceu de redirecionar pra tmp_path:\n" + "\n".join(linhas)
     )
