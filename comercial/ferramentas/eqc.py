@@ -28,8 +28,6 @@ As env de CAMINHO FINAL têm precedência sobre a raiz, cada uma no seu ponto
 
   - COMERCIAL_CONTRACT_SCHEMA  → caminho do JSON Schema do contrato.
   - COMERCIAL_INPUT_DIR        → diretório dos lotes leads_qualificados_*.json.
-  - COMERCIAL_A1_OUTPUT_DIR    → diretório de saída do dossiê (A1).
-  - COMERCIAL_A2_OUTPUT_DIR    → diretório de saída do diagnóstico (A2).
 
 Este módulo NÃO copia o schema do EQC para dentro do projeto, NÃO move pastas
 e NÃO cria arquivos — só resolve caminhos.
@@ -48,8 +46,6 @@ _PROJECT_ROOT = _REPO_DIR.parent
 # Sub-rotas dentro da árvore EQC, relativas à raiz do EQC resolvida.
 _SCHEMA_REL = ("contracts", "leads_qualificados.schema.json")
 _INPUT_REL = ("pipeline", "qualificador-output")
-_A1_OUTPUT_REL = ("pipeline", "comercial", "01-investigacao")
-_A2_OUTPUT_REL = ("pipeline", "comercial", "02-diagnostico")
 # Mesmo caminho relativo que qualificador/prospeccao_ia/saida_humana.py usa do lado de lá
 # (_SAIDA_HUMANA_REL) -- pasta oficial dos CSVs humanos (pistas Direta/Espera), consumida
 # pela Etapa E2b (planilha de envio). Só leitura deste lado -- COMERCIAL nunca escreve aqui.
@@ -68,8 +64,6 @@ ENV_EQC_ROOT = "COMERCIAL_EQC_ROOT"
 ENV_LEADFARM_ROOT = "LEADFARM_ROOT"
 ENV_CONTRACT_SCHEMA = "COMERCIAL_CONTRACT_SCHEMA"
 ENV_INPUT_DIR = "COMERCIAL_INPUT_DIR"
-ENV_A1_OUTPUT_DIR = "COMERCIAL_A1_OUTPUT_DIR"
-ENV_A2_OUTPUT_DIR = "COMERCIAL_A2_OUTPUT_DIR"
 ENV_SAIDA_HUMANA_DIR = "COMERCIAL_SAIDA_HUMANA_DIR"
 ENV_CAPTURAS_DIR = "COMERCIAL_CAPTURAS_DIR"
 
@@ -137,18 +131,6 @@ def diretorio_lotes_entrada() -> Path:
     """Diretório onde o QUALIFICADOR grava os lotes. `COMERCIAL_INPUT_DIR` vence;
     senão `<eqc_root>/pipeline/qualificador-output`."""
     return _rota(ENV_INPUT_DIR, *_INPUT_REL)
-
-
-def diretorio_saida_a1() -> Path:
-    """Saída do dossiê (A1). `COMERCIAL_A1_OUTPUT_DIR` vence; senão
-    `<eqc_root>/pipeline/comercial/01-investigacao`."""
-    return _rota(ENV_A1_OUTPUT_DIR, *_A1_OUTPUT_REL)
-
-
-def diretorio_saida_a2() -> Path:
-    """Saída do diagnóstico (A2). `COMERCIAL_A2_OUTPUT_DIR` vence; senão
-    `<eqc_root>/pipeline/comercial/02-diagnostico`."""
-    return _rota(ENV_A2_OUTPUT_DIR, *_A2_OUTPUT_REL)
 
 
 def diretorio_saida_humana() -> Path:

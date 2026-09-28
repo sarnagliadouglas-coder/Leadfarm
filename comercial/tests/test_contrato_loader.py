@@ -706,29 +706,6 @@ def test_fixture_do_schema_bate_com_o_contrato_instalado():
     )
 
 
-def test_lote_sintetico_da_trava_e_valido_contra_o_contrato(schema_path):
-    """`comercial/tests/fixtures/lote_sintetico_trava.json` é o lote que
-    `verificar_trava.py` referencia (só como texto -- ver o comentário de
-    LOTE_SINTETICO lá, o hook nunca abre esse arquivo) para montar o
-    comando Bash da forma aprovada do loader. Este teste garante que, se
-    esse arquivo existisse no caminho que o comando cita, ele seria um lote
-    2.0.0 de verdade válido -- não uma string qualquer. Decisão do diretor,
-    22/09/2026 (Etapa D, passo D4): trocar o LOTE_REAL histórico (1.1.0,
-    hoje inválido contra o schema atual) por este sintético, versionado
-    junto do teste."""
-    sys.path.insert(0, str(FERRAMENTAS_DIR))
-    # verificar_trava.py é ferramenta interna, fora do repositório público
-    # (28/09/2026): sem ela, o teste é pulado.
-    vt = pytest.importorskip("verificar_trava")
-
-    caminho = FIXTURES_DIR / "lote_sintetico_trava.json"
-    lote = cl.carregar_lote(caminho=caminho, schema=schema_path)
-
-    assert len(lote) == 1
-    assert lote.contract_version == cl.VERSAO_CONTRATO_SUPORTADA
-    assert lote.leads[0]["place_id"] == vt.PLACE_ID_SINTETICO
-
-
 def test_integracao_arquivo_real_do_qualificador():
     """Ponta a ponta contra os artefatos publicados pelo QUALIFICADOR nesta
     máquina. Pula em outra máquina/CI onde EQC não existe, e também quando o

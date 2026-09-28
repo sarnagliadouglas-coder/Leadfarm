@@ -2,7 +2,7 @@
 contrato_loader.py — porta de entrada única do COMERCIAL para o contrato
 produzido pelo QUALIFICADOR.
 
-Nenhum agente (A1, A2, A3, A4) deve abrir um arquivo de leads diretamente
+Nenhuma ferramenta do COMERCIAL deve abrir um arquivo de leads diretamente
 do disco. Todos passam por aqui. O motivo é que este módulo é o único
 ponto onde quatro garantias podem ser impostas de uma vez:
 
@@ -145,14 +145,13 @@ deste módulo.
 `lead["psi"]` é deliberadamente excluído do envolvimento estrutural acima:
 suas três formas (`None` | `{estado: NAO_VERIFICADO, ...}` |
 `{estado: CONFIRMADO_PRESENTE, performance_score, lcp_ms, ...}`, ver
-[referencias/insumos_sistema_qualificacao.md](../referencias/insumos_sistema_qualificacao.md),
-seção "`psi`") não batem com a forma `{valor, estado}` — no caso medido não
+`EQC/contracts/CONTRACT.md`, campo `psi`) não batem com a forma `{valor, estado}` — no caso medido não
 existe sequer uma chave `valor`. Isso é intencional e não vira
-`CampoEvidencia` (decisão D12, round A1 — psi tem forma própria demais para
+`CampoEvidencia` (decisão D12 — psi tem forma própria demais para
 caber nessa abstração sem distorcê-la).
 
 Isso deixa `lead["psi"]` cru: um `dict` ou `None`. Foi comprovado no piloto
-do A1 que isso convida ao erro óbvio — `lead["psi"]["estado"]` levanta
+da esteira A1–A4 (aposentada em 28/09/2026) que isso convida ao erro óbvio — `lead["psi"]["estado"]` levanta
 `TypeError: 'NoneType' object is not subscriptable` sempre que o lead não
 tem site, e é fácil esquecer de checar `is None` primeiro. `psi_estado()`
 existe só para isso: distinguir os três casos sem exigir que quem chama

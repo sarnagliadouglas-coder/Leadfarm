@@ -43,13 +43,6 @@ Thumbs.db
 EQC/pipeline/
 # Dados do QUALIFICADOR (leads coletados/qualificados, imports, arquivos, backups)
 qualificador/prospeccao_ia/data/
-# Saídas operacionais do COMERCIAL (piloto A1: dossiês, diagnósticos, fatos técnicos, screenshots)
-comercial/_piloto_a1/diagnosticos/
-comercial/_piloto_a1/dossies/
-comercial/_piloto_a1/fatos_tecnicos/
-# Scripts do piloto com dados de 3 leads reais escritos no codigo -- ficam so no disco (decisao do diretor, 28/09/2026).
-comercial/_piloto_a1/construir_dossies.py
-comercial/_piloto_a1/construir_diagnosticos.py
 # Registro de consumo de chamadas à API da Anthropic (Etapa E1) — dado operacional
 comercial/_consumo_llm/
 # Saída de rodadas de estratégia + mensagem (Etapa E2) — dado operacional

@@ -1,6 +1,6 @@
 """conftest.py do COMERCIAL -- só o guardião de isolamento de produção (Etapa D, fechamento
-— passo D8). O resto da suíte isola cada saída manualmente, teste a teste (ver
-COMERCIAL_A1_OUTPUT_DIR/COMERCIAL_A2_OUTPUT_DIR nos próprios arquivos de teste) -- este
+— passo D8). O resto da suíte isola cada saída manualmente, teste a teste (via
+monkeypatch/tmp_path nos próprios arquivos de teste) -- este
 fixture não substitui isso, é uma segunda rede, que não depende de ninguém lembrar de somar
 a próxima saída nova à lista de isolamento manual.
 """
@@ -20,15 +20,13 @@ import _guardiao_producao as guardiao  # noqa: E402
 
 def _pastas_producao():
     """Resolvidas UMA vez por sessão, contra o ambiente REAL (antes de qualquer
-    monkeypatch de teste). Cobre as duas saídas de artefato do COMERCIAL
-    (EQC/pipeline/comercial/, via eqc.eqc_root()) e o piloto (dado real, nunca gerado por
-    teste, mas incluído pra pegar qualquer escrita acidental nele também)."""
+    monkeypatch de teste). Cobre a árvore EQC (via eqc.eqc_root()) e as pastas de
+    dado operacional do COMERCIAL."""
     eqc_root = eqc.eqc_root()
     raiz_modulo = _TESTS_DIR.parent  # tests -> comercial
     return [
         ("EQC/pipeline", eqc_root / "pipeline"),
         ("EQC/contracts", eqc_root / "contracts"),
-        ("comercial/_piloto_a1", raiz_modulo / "_piloto_a1"),
         ("comercial/_consumo_llm", raiz_modulo / "_consumo_llm"),
         ("comercial/_mensagens", raiz_modulo / "_mensagens"),
         ("comercial/_planilhas", raiz_modulo / "_planilhas"),

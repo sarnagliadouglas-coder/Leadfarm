@@ -1,63 +1,75 @@
-# COMERCIAL — Análise e Abordagem Comercial
+# COMERCIAL — primeira mensagem de prospecção
 
-## Visão Geral
+O COMERCIAL recebe os leads já qualificados pelo QUALIFICADOR e produz uma
+**planilha de envio**: para cada lead, o argumento (ângulo) mais adequado, a
+primeira mensagem pronta e o canal para enviá-la. O envio é feito à mão, pelo
+vendedor. Depois, um comando registra quem foi contatado, para que as próximas
+planilhas deixem essas pessoas de fora.
 
-O COMERCIAL é um sistema de análise profunda de leads que já possuem website.
-O objetivo é investigar o negócio, produzir um diagnóstico comercial, criar uma abordagem personalizada e validá-la antes da entrega final.
+A primeira mensagem **não usa IA**: o ângulo é escolhido por regra e o texto vem
+de modelos fixos, editáveis sem mexer no código.
 
-## Fluxo Principal
-
-```
-Lead (entrada)
-  → Agente 1 — Investigação
-  → Agente 2 — Diagnóstico Comercial
-  → Agente 3 — Copywriter
-  → Agente 4 — Revisor
-  → Output Final
-```
-
-### Fluxo de Revisão (futuro)
-
-Se o Agente 4 (Revisor) retornar FAIL, o fluxo retorna ao Agente 3 (Copywriter) para correção, em vez de gerar um novo output final.
+## Fluxo
 
 ```
-Agente 4 → FAIL → Agente 3 (com feedback) → Agente 4 (nova revisão)
+contrato JSON + CSV do QUALIFICADOR
+  → contrato_loader    (valida contra o schema e trava a versão do contrato)
+  → angulo_mensagem    (escolhe o ângulo por regra e monta a mensagem do modelo)
+  → validador_mensagem (recusa o que afirma algo não medido)
+  → planilha_envio     (.xlsx: abas Geral, Nata e Como usar)
+  → registro_abordagens (depois dos envios: quem foi contatado ou pulado)
 ```
 
-## Estrutura do Projeto
+## Como o ângulo é escolhido
+
+- **Leads com site próprio:** o primeiro ângulo em que o lead se encaixa —
+  contato difícil no celular, poucas avaliações em comparação com um concorrente
+  da mesma busca, ou site lento no celular. Sem ângulo, sem mensagem.
+- **Leads sem site próprio** (nenhum site, portal, rede social, construtor
+  gratuito): um modelo para cada situação.
+
+Cada mensagem segue a estrutura *fato medido → consequência plausível → pergunta
+ou oferta pequena*. Um validador determinístico bloqueia, entre outras coisas,
+número que não veio da medição, preço, link, nome do negócio e frase que afirma
+um resultado não medido. A frase de abertura é testada em duas variantes (A/B),
+com o mesmo corpo de mensagem.
+
+## Como rodar
+
+```bash
+# gerar a planilha de envio a partir do lote mais recente do QUALIFICADOR
+python ferramentas/planilha_envio.py --saida-dir "<pasta de saída>"
+
+# depois dos envios: registrar quem foi contatado
+python ferramentas/registro_abordagens.py "<planilha preenchida>"
+
+# conferir se algum envio ainda não foi registrado (só lê)
+python ferramentas/pendencias_registro.py "<planilha preenchida>"
+```
+
+A localização do contrato é resolvida automaticamente; variáveis opcionais em
+[`.env.example`](.env.example).
+
+## Estrutura
 
 ```
-projeto onda 2/
-├── README.md                          # Este arquivo
-├── config/                            # Configurações gerais do sistema
-│   └── config.md                      # Definições e parâmetros globais
-├── pipeline/                          # Orquestração do fluxo entre agentes
-│   └── pipeline.md                    # Definição do fluxo principal
-├── agents/                            # Agentes do sistema
-│   ├── 01_investigacao/               # Agente 1 — Investigação
-│   ├── 02_diagnostico_comercial/      # Agente 2 — Diagnóstico Comercial
-│   ├── 03_copywriter/                 # Agente 3 — Copywriter
-│   └── 04_revisor/                    # Agente 4 — Revisor
-├── schemas/                           # Schemas dos outputs estruturados
-│   │                                   # (entrada do lead: EQC\contracts\CONTRACT.md, contrato do QUALIFICADOR)
-│   ├── 01_output_investigacao.md      # Output do Agente 1
-│   ├── 02_output_diagnostico.md       # Output do Agente 2
-│   ├── 03_output_copy.md             # Output do Agente 3
-│   ├── 04_output_revisao.md          # Output do Agente 4
-│   └── output_final.md               # Estrutura do output final
-└── docs/                              # Documentação do projeto
-    └── principios.md                  # Princípios e regras do sistema
+comercial/
+├── config/        textos das mensagens, regras de ângulo e listas do validador (JSON)
+├── ferramentas/   código (Python)
+├── prompts/       prompt de uma versão com IA, fora do fluxo atual
+└── tests/         suíte pytest
 ```
 
-## Princípios
+`ferramentas/llm_cliente.py`, `pipeline_estrategia_mensagem.py` e peças
+relacionadas são uma versão da mensagem escrita por IA, **fora do fluxo atual**:
+o teste mostrou que o que decide é o argumento, não quem escreve.
 
-- Separação clara de responsabilidades entre agentes
-- Outputs estruturados e previsíveis
-- Evidência separada de interpretação
-- Modularidade: substituir ou melhorar um agente sem reconstruir o sistema
-- Sem complexidade prematura
-- O sistema pode concluir que não existe ângulo comercial viável
+## Testes
 
-## Status
+```bash
+python -m pytest -q
+```
 
-**Fase atual:** Arquitetura criada — aguardando implementação dos agentes.
+Todos os dados de leads em testes e exemplos são **fictícios** (por exemplo,
+"Fisioficticia Salud", telefone `+34 600 000 000`). Dados reais — lotes,
+planilhas, registro de abordagens — ficam fora do repositório.
