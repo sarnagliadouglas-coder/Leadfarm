@@ -1,0 +1,101 @@
+{
+  "versao": 1,
+  "descricao": "Dominios que NAO sao o site proprio de um negocio, por categoria. Fonte unica do classificador site_classificacao.py. Casamento por host exato ou subdominio (dominios) e por sufixo de subdominio (sufixos, o apex nao casa) - nunca por substring solta.",
+  "copiado_em": "2026-09-20",
+  "fontes": {
+    "extrator:PLATFORM_DOMAINS": {"arquivo": "extrator/content/sidebar.js", "linhas": "669-688", "commit": "91b3b35", "copiado_em": "2026-09-20", "entradas_na_origem": 50, "nota": "Conjunto de dominios exatos. No EXTRATOR serve para nao marcar SUSPECT (sidebar.js:663-668) e mistura as categorias; aqui foi recategorizado. Copia: o EXTRATOR nao foi alterado nem e importado."},
+    "extrator:PLATFORM_DOMAIN_SUFFIXES": {"arquivo": "extrator/content/sidebar.js", "linhas": "691-696", "commit": "91b3b35", "copiado_em": "2026-09-20", "entradas_na_origem": 14, "nota": "Sufixos de subdominio. Todos os 14 foram para 'construtor' (business.site e negocio.site sao o site gratuito do Google; RUMO-COMERCIAL-2026-09 3.3 os lista como construtor)."},
+    "qualificador:DOMINIOS_REDE_SOCIAL": {"arquivo": "qualificador/prospeccao_ia/agent_coletor.py", "linhas": "64-69", "commit": "91b3b35", "copiado_em": "2026-09-20", "entradas_na_origem": 15, "nota": "DOMINIOS_REDE_SOCIAL. Continua sendo a lista que ROTEIA Onda 1/2 em agent_coletor.py; esta copia nao a substitui (roteamento intocado no passo C1)."}
+  },
+  "categorias": {
+    "rede_social": {
+      "dominios": [
+        {"valor": "instagram.com", "origem": ["extrator:PLATFORM_DOMAINS", "qualificador:DOMINIOS_REDE_SOCIAL"]},
+        {"valor": "facebook.com", "origem": ["extrator:PLATFORM_DOMAINS", "qualificador:DOMINIOS_REDE_SOCIAL"]},
+        {"valor": "fb.com", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "m.facebook.com", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "x.com", "origem": ["extrator:PLATFORM_DOMAINS", "qualificador:DOMINIOS_REDE_SOCIAL"]},
+        {"valor": "twitter.com", "origem": ["extrator:PLATFORM_DOMAINS", "qualificador:DOMINIOS_REDE_SOCIAL"]},
+        {"valor": "youtube.com", "origem": ["extrator:PLATFORM_DOMAINS", "qualificador:DOMINIOS_REDE_SOCIAL"]},
+        {"valor": "youtu.be", "origem": ["extrator:PLATFORM_DOMAINS", "qualificador:DOMINIOS_REDE_SOCIAL"]},
+        {"valor": "tiktok.com", "origem": ["extrator:PLATFORM_DOMAINS", "qualificador:DOMINIOS_REDE_SOCIAL"]},
+        {"valor": "linkedin.com", "origem": ["extrator:PLATFORM_DOMAINS", "qualificador:DOMINIOS_REDE_SOCIAL"]},
+        {"valor": "pinterest.com", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "pinterest.es", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "wa.me", "origem": ["extrator:PLATFORM_DOMAINS", "qualificador:DOMINIOS_REDE_SOCIAL"]},
+        {"valor": "t.me", "origem": ["extrator:PLATFORM_DOMAINS", "qualificador:DOMINIOS_REDE_SOCIAL"]},
+        {"valor": "linktr.ee", "origem": ["extrator:PLATFORM_DOMAINS", "qualificador:DOMINIOS_REDE_SOCIAL"]},
+        {"valor": "linktree.com", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "bio.link", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "beacons.ai", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "taplink.cc", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "campsite.bio", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "lnk.bio", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "solo.to", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "api.whatsapp.com", "origem": ["qualificador:DOMINIOS_REDE_SOCIAL"]},
+        {"valor": "telegram.me", "origem": ["qualificador:DOMINIOS_REDE_SOCIAL"]},
+        {"valor": "threads.net", "origem": ["qualificador:DOMINIOS_REDE_SOCIAL"]},
+        {"valor": "whatsapp.com", "origem": ["qualificador:DOMINIOS_REDE_SOCIAL"]}
+      ],
+      "sufixos": []
+    },
+    "portal": {
+      "dominios": [
+        {"valor": "booksy.com", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "fresha.com", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "treatwell.es", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "treatwell.com", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "topdoctors.es", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "doctoralia.es", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "doctoralia.com", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "paginasamarillas.es", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "yelp.com", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "yelp.es", "origem": ["extrator:PLATFORM_DOMAINS"]}
+      ],
+      "sufixos": []
+    },
+    "construtor": {
+      "dominios": [
+        {"valor": "wixsite.com", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "wordpress.com", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "blogspot.com", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "weebly.com", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "jimdosite.com", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "square.site", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "carrd.co", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "strikingly.com", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "mystrikingly.com", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "godaddysites.com", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "webnode.es", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "webnode.com", "origem": ["extrator:PLATFORM_DOMAINS"]}
+      ],
+      "sufixos": [
+        {"valor": ".wixsite.com", "origem": ["extrator:PLATFORM_DOMAIN_SUFFIXES"]},
+        {"valor": ".business.site", "origem": ["extrator:PLATFORM_DOMAIN_SUFFIXES"]},
+        {"valor": ".negocio.site", "origem": ["extrator:PLATFORM_DOMAIN_SUFFIXES"]},
+        {"valor": ".wordpress.com", "origem": ["extrator:PLATFORM_DOMAIN_SUFFIXES"]},
+        {"valor": ".blogspot.com", "origem": ["extrator:PLATFORM_DOMAIN_SUFFIXES"]},
+        {"valor": ".weebly.com", "origem": ["extrator:PLATFORM_DOMAIN_SUFFIXES"]},
+        {"valor": ".jimdosite.com", "origem": ["extrator:PLATFORM_DOMAIN_SUFFIXES"]},
+        {"valor": ".square.site", "origem": ["extrator:PLATFORM_DOMAIN_SUFFIXES"]},
+        {"valor": ".godaddysites.com", "origem": ["extrator:PLATFORM_DOMAIN_SUFFIXES"]},
+        {"valor": ".mystrikingly.com", "origem": ["extrator:PLATFORM_DOMAIN_SUFFIXES"]},
+        {"valor": ".strikingly.com", "origem": ["extrator:PLATFORM_DOMAIN_SUFFIXES"]},
+        {"valor": ".webnode.es", "origem": ["extrator:PLATFORM_DOMAIN_SUFFIXES"]},
+        {"valor": ".webnode.com", "origem": ["extrator:PLATFORM_DOMAIN_SUFFIXES"]},
+        {"valor": ".myportfolio.com", "origem": ["extrator:PLATFORM_DOMAIN_SUFFIXES"]}
+      ]
+    },
+    "superficie_google": {
+      "dominios": [
+        {"valor": "google.com", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "business.google.com", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "g.page", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "sites.google.com", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "maps.app.goo.gl", "origem": ["extrator:PLATFORM_DOMAINS"]},
+        {"valor": "goo.gl", "origem": ["extrator:PLATFORM_DOMAINS"]}
+      ],
+      "sufixos": []
+    }
+  }
+}

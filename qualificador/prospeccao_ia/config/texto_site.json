@@ -1,0 +1,5 @@
+{
+  "_anotado_em": "2026-09-24",
+  "_nota": "Limite de caracteres do texto visivel do site guardado no campo texto_site do contrato (2.1.0). Editar aqui, nunca no codigo. Texto alem deste limite e cortado (truncado=true), nunca descartado inteiro.",
+  "limite_chars": 4000
+}

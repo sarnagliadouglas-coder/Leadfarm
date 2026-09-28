@@ -1,0 +1,12 @@
+{
+    "categorias_desejadas": [],
+    "categorias_excluidas": [],
+    "rating_minimo": 0,
+    "reviews_minimo": 0,
+    "cidades_prioritarias": [],
+    "sinais_valorizados": {
+        "sem_site": true,
+        "instagram_ativo": true,
+        "facebook_ativo": false
+    }
+}

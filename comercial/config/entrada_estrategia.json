@@ -1,0 +1,6 @@
+{
+  "_anotado_em": "2026-09-24",
+  "_nota": "Limiar de reputacao para liberar o elogio (nota_google + avaliacoes_google) na entrada da chamada de estrategia/mensagem -- decisao do diretor, 24/09/2026. Abaixo de QUALQUER um dos dois, entrada_estrategia.py omite os dois campos (nunca so um) e o modelo vai direto ao problema vendavel, sem elogio.",
+  "nota_google_minima": 4.5,
+  "avaliacoes_minimas": 15
+}

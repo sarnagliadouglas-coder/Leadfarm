@@ -1,0 +1,378 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eqc.local/contracts/leads_qualificados.schema.json",
+  "title": "Contrato QUALIFICADOR -> COMERCIAL",
+  "description": "Schema formal do JSON produzido pelo QUALIFICADOR e consumido pelo COMERCIAL. Versão 2.1.0 — acrescenta o campo opcional texto_site (MINOR, aditivo) sobre a base 2.0.0 (separa nata e candidatos_triagem e transporta sinais renderizados do site). Qualquer mudança no conjunto de chaves obrigatórias exige incrementar contract_version (semver).",
+  "type": "object",
+  "required": ["contract_version", "schema_version", "generated_at", "stats", "nata", "candidatos_triagem", "descartados"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "const": "2.1.0",
+      "description": "Versão do CONTRATO externo (o que o COMERCIAL deve checar). Muda só quando o conjunto de campos do payload muda."
+    },
+    "schema_version": {
+      "type": "string",
+      "description": "Versão interna de formato de trabalho do QUALIFICADOR. Não é o que o COMERCIAL deve validar — existe por compatibilidade histórica."
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp ISO-8601 UTC de geração deste arquivo."
+    },
+    "origem_csv": {
+      "type": ["string", "null"],
+      "description": "Nome do arquivo CSV de origem desta rodada. Null se a importação não foi registrada (_import_meta.json ausente)."
+    },
+    "stats": { "$ref": "#/$defs/stats" },
+    "nata": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/lead" }
+    },
+    "candidatos_triagem": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/lead" },
+          { "required": ["candidato_triagem_visual"], "properties": {
+              "candidato_triagem_visual": { "$ref": "#/$defs/candidato_triagem_visual" }
+          }}
+        ]
+      }
+    },
+    "descartados": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/descartado" }
+    }
+  },
+
+  "$defs": {
+
+    "estado_evidencia": {
+      "type": "string",
+      "enum": ["CONFIRMADO_PRESENTE", "CONFIRMADO_AUSENTE", "NAO_VERIFICADO"],
+      "description": "Estado de uma evidência coletada. CONFIRMADO_PRESENTE/AUSENTE = o dado foi checado e o valor é conhecido (presente ou ausente). NAO_VERIFICADO = a fonte que confirmaria esse dado não foi consultada (ex: deep-scrape não rodou para este lead)."
+    },
+
+    "campo_evidencia": {
+      "type": "object",
+      "description": "Par valor/estado. 'valor' pode ser null mesmo quando estado é CONFIRMADO_AUSENTE (ausência confirmada) ou NAO_VERIFICADO (não checado).",
+      "required": ["valor", "estado"],
+      "additionalProperties": false,
+      "properties": {
+        "valor": {},
+        "estado": { "$ref": "#/$defs/estado_evidencia" }
+      }
+    },
+
+    "stats": {
+      "type": "object",
+      "required": ["nata", "candidatos_triagem", "descartados"],
+      "additionalProperties": false,
+      "properties": {
+        "nata": { "type": "integer", "minimum": 0 },
+        "candidatos_triagem": { "type": "integer", "minimum": 0 },
+        "leads_total": { "type": "integer", "minimum": 0 },
+        "sem_site": { "type": "integer", "minimum": 0 },
+        "com_site": { "type": "integer", "minimum": 0 },
+        "descartados": { "type": "integer", "minimum": 0 },
+        "onda2_ainda_pendente": { "type": "integer", "minimum": 0 },
+        "gbp_field_warnings": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
+      }
+    },
+
+    "lead": {
+      "type": "object",
+      "required": [
+        "place_id", "estagio_analise", "identidade", "contato", "classe_site",
+        "problema_vendavel",
+        "reputacao", "presenca_digital", "gbp_diagnostico", "gbp_campos_crus",
+        "evidencias_qualificador", "priorizacao", "analise_tecnica_site", "psi"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "place_id": { "type": ["string", "null"] },
+        "classe_site": {
+          "type": "string",
+          "enum": ["proprio", "portal", "construtor", "rede_social", "superficie_google", "sem_site"]
+        },
+        "problema_vendavel": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/problema_vendavel" }
+        },
+        "candidato_triagem_visual": { "$ref": "#/$defs/candidato_triagem_visual" },
+
+        "estagio_analise": {
+          "type": "string",
+          "enum": ["COMPLETO_SEM_SITE", "COMPLETO_COM_SITE"],
+          "description": "Define a trilha do lead. COMPLETO_SEM_SITE = passou pela Onda 1 (evidencias_qualificador.sinais_site, priorizacao.website_opportunity_score/priority_score/priority_label/lacunas_interpretadas e analise_tecnica_site vêm null). COMPLETO_COM_SITE = passou pela Onda 2 (priorizacao.contactability/risks vêm null)."
+        },
+
+        "identidade": {
+          "type": "object",
+          "required": ["nome", "nicho", "cidade", "endereco", "google_maps_url"],
+          "additionalProperties": false,
+          "properties": {
+            "nome": { "type": "string" },
+            "nicho": { "type": ["string", "null"] },
+            "cidade": { "type": ["string", "null"] },
+            "endereco": { "type": ["string", "null"] },
+            "google_maps_url": { "type": ["string", "null"] }
+          }
+        },
+
+        "contato": {
+          "type": "object",
+          "required": ["telefone", "email", "instagram", "facebook", "linkedin", "whatsapp_apto"],
+          "additionalProperties": false,
+          "properties": {
+            "telefone": { "$ref": "#/$defs/campo_evidencia" },
+            "email": { "$ref": "#/$defs/campo_evidencia" },
+            "instagram": { "$ref": "#/$defs/campo_evidencia" },
+            "facebook": { "$ref": "#/$defs/campo_evidencia" },
+            "linkedin": {
+              "$ref": "#/$defs/campo_evidencia",
+              "description": "Perfil de LinkedIn capturado pelo EXTRATOR. contract_version 1.1.0. Só transporte de evidência para o A1 (Investigação) -- NÃO entra em whatsapp_apto nem em nenhum score do QUALIFICADOR."
+            },
+            "whatsapp_apto": {
+              "type": "boolean",
+              "description": "Recalculado por telefone_utils.e_movel_espanhol sobre o telefone resolvido, combinado com presença de email/instagram/facebook. Regra específica de mercado ES."
+            }
+          }
+        },
+
+        "reputacao": {
+          "type": "object",
+          "required": ["nota_google", "review_count", "reputation_signal"],
+          "additionalProperties": false,
+          "properties": {
+            "nota_google": { "$ref": "#/$defs/campo_evidencia" },
+            "review_count": { "$ref": "#/$defs/campo_evidencia" },
+            "reputation_signal": {
+              "type": "string",
+              "enum": ["strong", "moderate", "weak", "unknown"]
+            }
+          }
+        },
+
+        "presenca_digital": {
+          "type": "object",
+          "required": ["tem_site_proprio", "website_url", "site_via_rede_social"],
+          "additionalProperties": false,
+          "properties": {
+            "tem_site_proprio": { "$ref": "#/$defs/campo_evidencia" },
+            "website_url": { "$ref": "#/$defs/campo_evidencia" },
+            "site_via_rede_social": {
+              "$ref": "#/$defs/campo_evidencia",
+              "description": "Preenchido quando o campo Website do CSV era, na verdade, um link de rede social (Instagram/Facebook) — nesse caso o lead é roteado para a trilha COMPLETO_SEM_SITE mesmo tendo Website preenchido."
+            }
+          }
+        },
+
+        "gbp_diagnostico": {
+          "type": "object",
+          "required": ["score_completude", "detail_scraped", "sinais", "lacunas"],
+          "additionalProperties": false,
+          "properties": {
+            "score_completude": { "type": ["integer", "null"] },
+            "detail_scraped": { "type": "boolean" },
+            "sinais": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "required": ["estado"],
+                "properties": { "estado": { "$ref": "#/$defs/estado_evidencia" } }
+              }
+            },
+            "lacunas": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+
+        "gbp_campos_crus": {
+          "type": "object",
+          "required": [
+            "ficha_reivindicada", "tem_horario", "tem_foto_destaque", "tem_descricao",
+            "tem_faixa_preco", "tem_plus_code", "tem_dono_listado", "detail_scraped"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "ficha_reivindicada": { "$ref": "#/$defs/campo_evidencia" },
+            "tem_horario": { "$ref": "#/$defs/campo_evidencia" },
+            "tem_foto_destaque": { "$ref": "#/$defs/campo_evidencia" },
+            "tem_descricao": { "$ref": "#/$defs/campo_evidencia" },
+            "tem_faixa_preco": { "$ref": "#/$defs/campo_evidencia" },
+            "tem_plus_code": { "$ref": "#/$defs/campo_evidencia" },
+            "tem_dono_listado": { "$ref": "#/$defs/campo_evidencia" },
+            "detail_scraped": { "type": "boolean" }
+          }
+        },
+
+        "evidencias_qualificador": {
+          "type": "object",
+          "description": "Só FATOS rastreáveis ao lead — nunca interpretação. Uso pretendido: insumo para o A1 (Investigação) confirmar/refutar ao vivo.",
+          "required": ["fatos", "sinais_site"],
+          "additionalProperties": false,
+          "properties": {
+            "fatos": { "type": "array", "items": { "type": "string" } },
+            "sinais_site": {
+              "description": "Dict cru dos ~16 flags extraídos do HTML do site. Null para leads COMPLETO_SEM_SITE.",
+              "type": ["object", "null"]
+            }
+          }
+        },
+
+        "priorizacao": {
+          "type": "object",
+          "description": "NÃO AUTORITATIVO. Uso permitido: ordenar fila de atendimento. Uso proibido: julgar o lead — essa função é do COMERCIAL (A1-A4), sobre evidência verificada.",
+          "required": [
+            "autoritativo", "commercial_fit_score", "priority", "contactability",
+            "risks", "reasons", "website_opportunity_score", "priority_score",
+            "priority_label", "lacunas_interpretadas"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "autoritativo": { "const": false },
+            "commercial_fit_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "priority": {
+              "type": ["string", "null"],
+              "enum": ["alta", "media", "baixa", null],
+              "description": "Só Onda 1 (COMPLETO_SEM_SITE). Null na Onda 2 — ver priority_label."
+            },
+            "contactability": {
+              "type": ["string", "null"],
+              "enum": ["alta", "media", "baixa", null],
+              "description": "Exclusivo da Onda 1. Sempre null para COMPLETO_COM_SITE."
+            },
+            "risks": {
+              "type": ["array", "null"],
+              "items": { "type": "string" },
+              "description": "Exclusivo da Onda 1. Sempre null para COMPLETO_COM_SITE."
+            },
+            "reasons": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Breakdown do commercial_fit_score. Populado nas duas ondas."
+            },
+            "website_opportunity_score": {
+              "type": ["number", "null"],
+              "description": "Só Onda 2. Null para COMPLETO_SEM_SITE."
+            },
+            "priority_score": { "type": ["number", "null"] },
+            "priority_label": {
+              "type": ["string", "null"],
+              "description": "Só Onda 2. Inclui o estado needs_review quando o insumo para o cálculo está incompleto — por isso não é unificado com 'priority'."
+            },
+            "lacunas_interpretadas": {
+              "type": ["array", "null"],
+              "items": { "type": "string" },
+              "description": "Rationale do website_opportunity_score. Só Onda 2."
+            }
+          }
+        },
+
+        "analise_tecnica_site": {
+          "type": "object",
+          "description": "Metadado técnico do processo de análise — não é fato do lead nem julgamento comercial. Sempre null (as três chaves) para COMPLETO_SEM_SITE.",
+          "required": ["status", "error_type", "avaliado_em", "telefone_na_pagina"],
+          "additionalProperties": false,
+          "properties": {
+            "status": { "type": ["string", "null"] },
+            "error_type": {
+              "type": ["string", "null"],
+              "enum": ["timeout", "http_error", "ssl_error", "connection_error", "invalid_url", "unknown", null]
+            },
+            "avaliado_em": { "type": ["string", "null"], "format": "date-time" }
+            ,"telefone_na_pagina": { "$ref": "#/$defs/campo_telefone_na_pagina" }
+          }
+        },
+
+        "psi": {
+          "description": "Métrica de PageSpeed Insights — mede performance de site, então só existe para quem tem site. Null (puro, não objeto) para COMPLETO_SEM_SITE. Para COMPLETO_COM_SITE: {estado: NAO_VERIFICADO, motivo, medido_em: null} quando não medido ainda (PSI desligado ou lead pendente na fila), ou objeto completo quando medido.",
+          "type": ["object", "null"],
+          "if": { "type": "object" },
+          "then": {
+            "required": ["estado"],
+            "properties": {
+              "estado": { "type": "string" }
+            }
+          }
+        },
+
+        "texto_site": {
+          "description": "Adicionado em 2.1.0 (MINOR, aditivo — CONTRACT.md, histórico de versões). Texto visível do site (innerText renderizado, espaços colapsados, nunca HTML), até o limite de caracteres de config/texto_site.json (hoje 4000) — preferindo o dispositivo mobile, com o desktop como alternativa. Campo OPCIONAL: pode estar ausente em leads sem site ou em lotes gerados antes de 2.1.0. Null (puro, não objeto) para COMPLETO_SEM_SITE ou quando a renderização não mediu nenhum dos dois dispositivos ainda. Para COMPLETO_COM_SITE: {estado: NAO_VERIFICADO, motivo, medido_em: null} sem medição, ou objeto completo (texto, chars_originais, truncado, dispositivo, coletado_em) quando medido.",
+          "type": ["object", "null"],
+          "if": { "type": "object" },
+          "then": {
+            "required": ["estado"],
+            "properties": {
+              "estado": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+
+    "problema_vendavel": {
+      "type": "object",
+      "required": ["tipo", "evidencia", "medicao", "coletado_em"],
+      "additionalProperties": false,
+      "properties": {
+        "tipo": { "enum": ["sem_contato_visivel", "lento_no_celular", "fora_do_ar"] },
+        "evidencia": { "type": "string" },
+        "medicao": { "enum": ["site_renderizado", "psi"] },
+        "coletado_em": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+
+    "campo_telefone_na_pagina": {
+      "type": "object",
+      "required": ["valor", "estado"],
+      "additionalProperties": false,
+      "properties": {
+        "valor": { "type": ["string", "null"], "enum": ["link", "texto", null] },
+        "estado": { "$ref": "#/$defs/estado_evidencia" }
+      }
+    },
+
+    "candidato_triagem_visual": {
+      "type": "object",
+      "required": ["captura_ref", "coletado_em"],
+      "additionalProperties": false,
+      "properties": {
+        "captura_ref": { "type": ["string", "null"] },
+        "coletado_em": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+
+    "descartado": {
+      "type": "object",
+      "required": ["place_id", "identidade", "motivo", "campos_do_corte"],
+      "additionalProperties": false,
+      "properties": {
+        "place_id": { "type": ["string", "null"] },
+        "identidade": {
+          "type": "object",
+          "required": ["nome", "nicho", "cidade"],
+          "additionalProperties": false,
+          "properties": {
+            "nome": { "type": "string" },
+            "nicho": { "type": ["string", "null"] },
+            "cidade": { "type": ["string", "null"] }
+          }
+        },
+        "motivo": {
+          "type": "string",
+          "description": "rejection_reason: large_organization | no_contact_no_signal | icp_* | sem_canal_de_contato | qualification_declined (lista pode crescer — não é enum fechado no schema para não quebrar em cada motivo novo)."
+        },
+        "campos_do_corte": {
+          "type": "object",
+          "description": "Varia por motivo — os campos concretos que motivaram o corte."
+        }
+      }
+    }
+  }
+}

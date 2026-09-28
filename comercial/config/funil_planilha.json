@@ -1,0 +1,11 @@
+{
+  "_anotado_em": "2026-09-27",
+  "_nota": "Listas de escolha (validacao de dados do Excel) das colunas de acompanhamento do diretor -- Etapa, Resultado, Mensagem, Decidi nao enviar. Mesmas listas nas duas abas da planilha de envio (Geral, Nata) e no registro_abordagens.xlsx (decisao do diretor, 24/09/2026, quarta rodada). Motivo da edicao e Motivo de nao enviar sao texto livre, sem lista. 'resposta negativa' acrescentada a Resultado na quinta rodada do mesmo dia, para separar positiva de negativa. 'resposta neutra' acrescentada em 27/09/2026 (teste A/B da abertura): resposta útil que não é positiva nem negativa, ex. '¿Quién eres?'. Editar aqui, nunca no codigo.",
+  "etapa": ["1º contato", "follow-up 1", "follow-up 2"],
+  "resultado": [
+    "sem resposta", "resposta positiva", "resposta negativa", "resposta neutra", "pediu informação", "aceitou conversar",
+    "reunião", "proposta", "cliente", "pediu para não contatar", "bloqueou", "contato inválido"
+  ],
+  "mensagem": ["enviada como está", "editada por mim"],
+  "decidi_nao_enviar": ["sim"]
+}

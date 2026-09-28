@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://comercial.local/schemas/02_output_diagnostico.schema.json",
+  "title": "Diagnóstico do Agente 2 (Diagnóstico Comercial) — v1.0",
+  "description": "Contraparte formal de schemas/02_output_diagnostico.md. Cobre estrutura e tipos; as regras de referência cruzada contra o dossiê do Agente 1 (Regras de validação 1, 2, 3, 5, 6, 7 do .md) NÃO são expressáveis em JSON Schema puro e são checadas em código por ferramentas/validador_diagnostico.py — mesma divisão de trabalho usada em 01_output_investigacao.schema.json / validador_dossie.py.",
+  "type": "object",
+  "required": [
+    "schema_version", "place_id", "dossie_origem", "lote_origem", "estagio_analise",
+    "diagnosticado_em", "modelo", "decisao", "achados", "angulo_principal", "sem_angulo"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "place_id": { "type": "string", "minLength": 1 },
+    "dossie_origem": { "type": "string", "minLength": 1 },
+    "lote_origem": { "type": "string", "minLength": 1 },
+    "estagio_analise": { "type": "string", "enum": ["COMPLETO_SEM_SITE", "COMPLETO_COM_SITE"] },
+    "diagnosticado_em": { "type": "string", "format": "date-time" },
+    "modelo": { "type": "string", "minLength": 1 },
+    "decisao": { "type": "string", "enum": ["prosseguir", "sem_angulo"] },
+    "achados": { "type": "array", "items": { "$ref": "#/$defs/achado" } },
+    "angulo_principal": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/angulo_principal" }
+      ]
+    },
+    "sem_angulo": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/sem_angulo" }
+      ]
+    }
+  },
+
+  "allOf": [
+    {
+      "if": { "properties": { "decisao": { "const": "prosseguir" } }, "required": ["decisao"] },
+      "then": {
+        "properties": {
+          "achados": { "minItems": 1 },
+          "angulo_principal": { "$ref": "#/$defs/angulo_principal" },
+          "sem_angulo": { "const": null }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "decisao": { "const": "sem_angulo" } }, "required": ["decisao"] },
+      "then": {
+        "properties": {
+          "achados": { "const": [] },
+          "angulo_principal": { "const": null },
+          "sem_angulo": { "$ref": "#/$defs/sem_angulo" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decisao": { "const": "sem_angulo" },
+          "estagio_analise": { "const": "COMPLETO_SEM_SITE" }
+        },
+        "required": ["decisao", "estagio_analise"]
+      },
+      "then": {
+        "properties": {
+          "sem_angulo": {
+            "type": "object",
+            "properties": { "fatos_ref": { "minItems": 1 } }
+          }
+        }
+      }
+    }
+  ],
+
+  "$defs": {
+
+    "achado": {
+      "type": "object",
+      "required": [
+        "id", "natureza", "descricao", "relevancia_comercial", "papel",
+        "fatos_ref", "inferencias_ref", "incertezas_ref", "reforca_achado_ref"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^achado_" },
+        "natureza": { "type": "string", "enum": ["problema", "oportunidade"] },
+        "descricao": { "type": "string", "minLength": 1 },
+        "relevancia_comercial": { "type": "string", "enum": ["alta", "media", "baixa"] },
+        "papel": { "type": "string", "enum": ["principal", "secundario", "evidencia"] },
+        "fatos_ref": { "type": "array", "items": { "type": "string", "pattern": "^fato_" }, "minItems": 1 },
+        "inferencias_ref": { "type": "array", "items": { "type": "string", "pattern": "^inf_" } },
+        "incertezas_ref": { "type": "array", "items": { "type": "string", "pattern": "^inc_" } },
+        "reforca_achado_ref": { "type": ["string", "null"], "pattern": "^achado_" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "papel": { "const": "evidencia" } }, "required": ["papel"] },
+          "then": { "properties": { "reforca_achado_ref": { "type": "string", "pattern": "^achado_" } } },
+          "else": { "properties": { "reforca_achado_ref": { "const": null } } }
+        }
+      ]
+    },
+
+    "angulo_principal": {
+      "type": "object",
+      "required": ["achado_ref", "justificativa_escolha"],
+      "additionalProperties": false,
+      "properties": {
+        "achado_ref": { "type": "string", "pattern": "^achado_" },
+        "justificativa_escolha": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "sem_angulo": {
+      "type": "object",
+      "required": ["motivo_categoria", "motivo_descricao", "motivo_crm", "evidencias_consideradas", "fatos_ref"],
+      "additionalProperties": false,
+      "properties": {
+        "motivo_categoria": { "type": "string", "minLength": 1 },
+        "motivo_descricao": { "type": "string", "minLength": 1 },
+        "motivo_crm": { "type": "string", "minLength": 1 },
+        "evidencias_consideradas": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^(fato_|inf_|inc_)" }
+        },
+        "fatos_ref": { "type": "array", "items": { "type": "string", "pattern": "^fato_" } }
+      }
+    }
+  }
+}

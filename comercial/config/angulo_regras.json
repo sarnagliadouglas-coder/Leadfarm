@@ -1,0 +1,14 @@
+{
+  "_anotado_em": "2026-09-24",
+  "_nota": "Regras de escolha do ângulo da primeira mensagem (MVP, mudança de rumo decidida pelo diretor em 24/09/2026 -- angulo_mensagem.py). Para nata e candidatos_triagem, nesta ordem: 'contato' (telefone_na_pagina == 'texto') -> 'poucas_avaliacoes' (nota/avaliações/concorrente, limiares abaixo) -> 'lentidao' (lcp_minimo_ms) -> 'sem_angulo'. Nunca fixo no código. 'poucas_avaliacoes' renomeado de 'reputacao' na sexta rodada de decisões do diretor (mesmo dia): nota mínima caiu de 4,5 para 4,0, multiplicador do concorrente subiu de 5x para 10x, e passou a exigir avaliacoes_minimo (1) -- faixa 1-30, com dois modelos de mensagem (1 a 4 avaliações não cita a nota; 5 a 30 cita).",
+  "poucas_avaliacoes": {
+    "nota_minima": 4.0,
+    "avaliacoes_minimo": 1,
+    "avaliacoes_maximo": 30,
+    "multiplicador_concorrente_minimo": 10
+  },
+  "lentidao": {
+    "lcp_minimo_ms": 10000,
+    "rodadas_minimas_para_citar_numero": 2
+  }
+}

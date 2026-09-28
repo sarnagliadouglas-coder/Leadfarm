@@ -1,0 +1,349 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://comercial.local/schemas/01_output_investigacao.schema.json",
+  "title": "Dossiê do Agente 1 (Investigação) — v2.0",
+  "description": "Contraparte formal de schemas/01_output_investigacao.md. Cobre estrutura e tipos; as regras de referência cruzada entre ids (Regras de validação 1, 5, 6, 9, 10, 11, 12 do .md) NÃO são expressáveis em JSON Schema puro e são checadas em código por ferramentas/validador_dossie.py — mesma divisão de trabalho usada em leads_qualificados.schema.json / contrato_loader.py.",
+  "type": "object",
+  "required": [
+    "schema_version", "place_id", "lote_origem", "investigado_em", "modelo",
+    "escalonamento", "status_investigacao", "negocio", "presenca_digital",
+    "fatos_observados", "fontes_dos_fatos", "inferencias", "incertezas",
+    "dados_nao_encontrados", "por_dispositivo", "jornada_principal", "qualificador"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "2.0" },
+    "place_id": { "type": "string", "minLength": 1 },
+    "lote_origem": { "type": "string", "minLength": 1 },
+    "investigado_em": { "type": "string", "format": "date-time" },
+    "modelo": { "type": "string", "enum": ["claude-sonnet-5", "claude-opus-5"] },
+    "escalonamento": {
+      "type": "object",
+      "required": ["ocorreu", "motivo"],
+      "additionalProperties": false,
+      "properties": {
+        "ocorreu": { "type": "boolean" },
+        "motivo": { "type": ["string", "null"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "ocorreu": { "const": false } } },
+          "then": { "properties": { "motivo": { "const": null } } }
+        },
+        {
+          "if": { "properties": { "ocorreu": { "const": true } } },
+          "then": { "properties": { "motivo": { "type": "string", "minLength": 1 } } }
+        }
+      ]
+    },
+    "status_investigacao": { "type": "string", "enum": ["completa", "parcial", "bloqueada"] },
+
+    "negocio": { "$ref": "#/$defs/negocio" },
+    "presenca_digital": { "$ref": "#/$defs/presenca_digital" },
+    "fatos_observados": { "type": "array", "items": { "$ref": "#/$defs/fato_observado" } },
+    "fontes_dos_fatos": { "type": "array", "items": { "$ref": "#/$defs/fonte_do_fato" } },
+    "inferencias": { "type": "array", "items": { "$ref": "#/$defs/inferencia" } },
+    "incertezas": { "type": "array", "items": { "$ref": "#/$defs/incerteza" } },
+    "dados_nao_encontrados": { "type": "array", "items": { "$ref": "#/$defs/dado_nao_encontrado" } },
+    "por_dispositivo": { "$ref": "#/$defs/por_dispositivo" },
+    "jornada_principal": { "$ref": "#/$defs/jornada_principal" },
+    "qualificador": { "$ref": "#/$defs/qualificador" }
+  },
+
+  "$defs": {
+
+    "campo_evidencia": {
+      "type": "object",
+      "required": ["valor", "estado"],
+      "additionalProperties": false,
+      "properties": {
+        "valor": {},
+        "estado": { "type": "string", "enum": ["CONFIRMADO_PRESENTE", "CONFIRMADO_AUSENTE", "NAO_VERIFICADO"] }
+      }
+    },
+
+    "divergencia": {
+      "type": "object",
+      "required": ["campo", "valor_coletado", "valor_verificado", "observacao"],
+      "additionalProperties": false,
+      "properties": {
+        "campo": { "type": "string", "minLength": 1 },
+        "valor_coletado": {},
+        "valor_verificado": {},
+        "observacao": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "negocio": {
+      "type": "object",
+      "required": [
+        "nome", "nicho", "localizacao", "servicos_principais", "website", "google_maps_url",
+        "rating_coletado", "total_avaliacoes_coletado", "rating_verificado", "total_avaliacoes_verificado",
+        "redes_sociais", "canais_de_contato", "divergencias_com_qualificador"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "nome": { "type": "string" },
+        "nicho": { "type": ["string", "null"] },
+        "localizacao": { "type": ["string", "null"] },
+        "servicos_principais": { "type": "array", "items": { "type": "string" } },
+        "website": { "type": ["string", "null"] },
+        "google_maps_url": { "type": ["string", "null"] },
+        "rating_coletado": { "$ref": "#/$defs/campo_evidencia" },
+        "total_avaliacoes_coletado": { "$ref": "#/$defs/campo_evidencia" },
+        "rating_verificado": { "type": ["number", "null"] },
+        "total_avaliacoes_verificado": { "type": ["integer", "null"] },
+        "redes_sociais": {
+          "type": "object",
+          "required": ["instagram", "facebook", "linkedin"],
+          "additionalProperties": false,
+          "properties": {
+            "instagram": { "type": ["string", "null"] },
+            "facebook": { "type": ["string", "null"] },
+            "linkedin": { "type": ["string", "null"] }
+          }
+        },
+        "canais_de_contato": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["tipo", "valor", "onde"],
+            "additionalProperties": false,
+            "properties": {
+              "tipo": { "type": "string", "enum": ["telefone", "whatsapp", "email"] },
+              "valor": { "type": "string" },
+              "onde": { "type": "string" }
+            }
+          }
+        },
+        "divergencias_com_qualificador": { "type": "array", "items": { "$ref": "#/$defs/divergencia" } }
+      }
+    },
+
+    "presenca_digital": {
+      "type": "object",
+      "required": ["website", "mobile", "desktop", "https", "gbp", "caminho_para_contato", "carregamento_percebido"],
+      "additionalProperties": false,
+      "properties": {
+        "website": { "type": "string", "enum": ["funcional", "parcialmente_funcional", "inacessivel"] },
+        "mobile": { "type": "string", "enum": ["adequado", "problematico", "nao_testado"] },
+        "desktop": { "type": "string", "enum": ["adequado", "problematico", "nao_testado"] },
+        "https": { "type": ["boolean", "null"] },
+        "gbp": { "type": "string", "enum": ["ativo_completo", "ativo_incompleto", "inexistente", "nao_verificado"] },
+        "caminho_para_contato": { "type": "string", "enum": ["claro", "confuso", "quebrado", "inexistente"] },
+        "carregamento_percebido": { "type": "string", "enum": ["rapido", "medio", "lento", "nao_avaliado"] }
+      }
+    },
+
+    "fato_observado": {
+      "type": "object",
+      "required": ["id", "categoria", "natureza", "afirmacao", "dispositivo", "confianca", "fontes_ref"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^fato_" },
+        "categoria": {
+          "type": "string",
+          "enum": [
+            "acessibilidade", "identidade_negocio", "conversao", "contato", "mobile",
+            "performance", "gbp", "conteudo", "seo_local", "maturidade_digital"
+          ]
+        },
+        "natureza": { "type": "string", "enum": ["problema", "ponto_forte", "neutro"] },
+        "afirmacao": { "type": "string", "minLength": 1 },
+        "dispositivo": { "type": "string", "enum": ["mobile", "desktop", "ambos", "nao_aplicavel"] },
+        "confianca": { "type": "string", "enum": ["alta", "media"] },
+        "fontes_ref": { "type": "array", "items": { "type": "string", "pattern": "^fonte_" }, "minItems": 1 },
+        "consequencia_observavel": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "natureza": { "const": "problema" } } },
+          "then": { "required": ["consequencia_observavel"] },
+          "else": { "not": { "required": ["consequencia_observavel"] } }
+        }
+      ]
+    },
+
+    "fonte_do_fato": {
+      "type": "object",
+      "required": ["id", "tipo", "local", "como_verificado"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^fonte_" },
+        "tipo": { "type": "string", "enum": ["url", "elemento_dom", "campo_contrato", "screenshot", "gbp", "ferramenta_fetch_tecnico"] },
+        "local": { "type": "string", "minLength": 1 },
+        "como_verificado": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "inferencia": {
+      "type": "object",
+      "required": ["id", "afirmacao", "baseada_em", "confianca"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^inf_" },
+        "afirmacao": { "type": "string", "minLength": 1 },
+        "baseada_em": { "type": "array", "items": { "type": "string", "pattern": "^fato_" }, "minItems": 1 },
+        "confianca": { "type": "string", "enum": ["alta", "media"] }
+      }
+    },
+
+    "incerteza": {
+      "type": "object",
+      "required": ["id", "descricao", "impacto_na_analise"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^inc_" },
+        "descricao": { "type": "string", "minLength": 1 },
+        "sinais_conflitantes": { "type": "array", "items": { "type": "string", "pattern": "^fato_" } },
+        "impacto_na_analise": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "dado_nao_encontrado": {
+      "type": "object",
+      "required": ["item", "motivo", "tentativas", "impacto_na_analise"],
+      "additionalProperties": false,
+      "properties": {
+        "item": { "type": "string", "minLength": 1 },
+        "motivo": { "type": "string", "minLength": 1 },
+        "tentativas": { "type": "string", "minLength": 1 },
+        "impacto_na_analise": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "por_dispositivo": {
+      "type": "object",
+      "required": ["mobile", "desktop"],
+      "additionalProperties": false,
+      "properties": {
+        "mobile": { "$ref": "#/$defs/por_dispositivo_item" },
+        "desktop": { "$ref": "#/$defs/por_dispositivo_item" }
+      }
+    },
+    "por_dispositivo_item": {
+      "type": "object",
+      "required": ["funcionamento", "fatos_ref"],
+      "additionalProperties": false,
+      "properties": {
+        "funcionamento": { "type": "string", "minLength": 1 },
+        "fatos_ref": { "type": "array", "items": { "type": "string", "pattern": "^fato_" } }
+      }
+    },
+
+    "jornada_principal": {
+      "type": "object",
+      "required": ["entrada", "etapas", "resultado", "onde_interrompeu", "caminhos_alternativos"],
+      "additionalProperties": false,
+      "properties": {
+        "entrada": { "type": ["string", "null"] },
+        "etapas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["etapa", "resultado", "fato_ref"],
+            "additionalProperties": false,
+            "properties": {
+              "etapa": { "type": "string" },
+              "resultado": { "type": "string", "enum": ["ok", "falha"] },
+              "fato_ref": { "type": ["string", "null"], "pattern": "^fato_" }
+            }
+          }
+        },
+        "resultado": { "type": "string", "enum": ["completa", "interrompida", "nao_testavel"] },
+        "onde_interrompeu": { "type": ["string", "null"] },
+        "caminhos_alternativos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["canal", "disponivel", "fato_ref"],
+            "additionalProperties": false,
+            "properties": {
+              "canal": { "type": "string" },
+              "disponivel": { "type": "boolean" },
+              "fato_ref": { "type": ["string", "null"], "pattern": "^fato_" }
+            }
+          }
+        }
+      }
+    },
+
+    "priorizacao_onda1": {
+      "type": "object",
+      "required": ["commercial_fit_score", "reasons", "priority", "contactability", "risks"],
+      "additionalProperties": false,
+      "properties": {
+        "commercial_fit_score": { "type": "integer" },
+        "reasons": { "type": "array", "items": { "type": "string" } },
+        "priority": { "type": ["string", "null"] },
+        "contactability": { "type": ["string", "null"] },
+        "risks": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "priorizacao_onda2": {
+      "type": "object",
+      "required": ["commercial_fit_score", "reasons", "priority_label"],
+      "additionalProperties": false,
+      "properties": {
+        "commercial_fit_score": { "type": "integer" },
+        "reasons": { "type": "array", "items": { "type": "string" } },
+        "priority_label": { "type": ["string", "null"] }
+      }
+    },
+
+    "qualificador": {
+      "type": "object",
+      "required": ["sinais_recebidos", "procedencia"],
+      "additionalProperties": false,
+      "properties": {
+        "sinais_recebidos": {
+          "type": "object",
+          "required": ["estagio_analise", "evidencias_qualificador", "priorizacao_nao_autoritativa"],
+          "additionalProperties": false,
+          "properties": {
+            "estagio_analise": { "type": "string", "enum": ["COMPLETO_SEM_SITE", "COMPLETO_COM_SITE"] },
+            "evidencias_qualificador": {
+              "type": "object",
+              "required": ["fatos"],
+              "additionalProperties": false,
+              "properties": { "fatos": { "type": "array", "items": { "type": "string" } } }
+            },
+            "priorizacao_nao_autoritativa": {
+              "oneOf": [
+                { "$ref": "#/$defs/priorizacao_onda1" },
+                { "$ref": "#/$defs/priorizacao_onda2" }
+              ]
+            }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "estagio_analise": { "const": "COMPLETO_SEM_SITE" } } },
+              "then": { "properties": { "priorizacao_nao_autoritativa": { "$ref": "#/$defs/priorizacao_onda1" } } }
+            },
+            {
+              "if": { "properties": { "estagio_analise": { "const": "COMPLETO_COM_SITE" } } },
+              "then": { "properties": { "priorizacao_nao_autoritativa": { "$ref": "#/$defs/priorizacao_onda2" } } }
+            }
+          ]
+        },
+        "procedencia": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["origem", "insumo_usado", "o_que_foi_investigado", "o_que_foi_encontrado", "relevancia_comercial", "fatos_ref"],
+            "additionalProperties": false,
+            "properties": {
+              "origem": { "type": "string", "enum": ["qualificador", "investigacao_base"] },
+              "insumo_usado": { "type": ["string", "null"] },
+              "o_que_foi_investigado": { "type": "string" },
+              "o_que_foi_encontrado": { "type": "string" },
+              "relevancia_comercial": { "type": "string", "enum": ["sim", "nao", "n/a"] },
+              "fatos_ref": { "type": "array", "items": { "type": "string", "pattern": "^fato_" } }
+            }
+          }
+        }
+      }
+    }
+  }
+}

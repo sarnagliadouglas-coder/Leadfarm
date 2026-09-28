@@ -1,0 +1,57 @@
+{
+  "versao": 1,
+  "descricao": "Textos de paginas de desafio (anti-bot / verificacao / CAPTCHA). Usada por site_renderizado.py. Todas as entradas ja normalizadas: minusculas, sem acento, espacos simples. 'titulos' casam no <title> em qualquer pagina; 'frases' so casam em pagina CURTA (limite_texto_curto), para nao acusar o aviso 'protegido por reCAPTCHA' de um site normal.",
+  "limite_texto_curto": 1500,
+  "fontes": {
+    "lista_inicial_c2": {
+      "origem": "Definida no passo C2 da Etapa C por conhecimento de paginas de desafio comuns (Cloudflare, Sucuri, Incapsula, reCAPTCHA) em ingles e espanhol; o fenomeno esta descrito em comercial/agents/01_investigacao/prompt.md:91 e ESTUDO-COMERCIAL-CUSTO.md secao 3.",
+      "copiado_em": "2026-09-20",
+      "calibrada": false,
+      "nota": "NAO validada contra paginas reais: o passo C5 mede acerto e falso positivo. Lista inicial, a ser ampliada com o que a medicao encontrar."
+    }
+  },
+  "titulos": [
+    "just a moment",
+    "attention required",
+    "access denied",
+    "security check",
+    "verification required",
+    "verifying you are human",
+    "are you a robot",
+    "checking your browser",
+    "ddos protection",
+    "captcha",
+    "verificacion de seguridad",
+    "comprobando su navegador",
+    "comprobando tu navegador",
+    "acceso denegado"
+  ],
+  "frases": [
+    "verify you are human",
+    "verifying you are human",
+    "checking if the site connection is secure",
+    "checking your browser before accessing",
+    "enable javascript and cookies to continue",
+    "please complete the security check",
+    "complete the captcha",
+    "i am not a robot",
+    "i'm not a robot",
+    "unusual traffic from your computer network",
+    "your request has been blocked",
+    "this request was blocked by",
+    "ddos protection by",
+    "performance & security by cloudflare",
+    "sucuri website firewall",
+    "incapsula incident id",
+    "press & hold to confirm you are a human",
+    "verifica que eres humano",
+    "verificando que eres humano",
+    "comprueba que eres humano",
+    "no soy un robot",
+    "comprobando si la conexion del sitio es segura",
+    "por favor, completa la verificacion de seguridad",
+    "se ha bloqueado su solicitud",
+    "trafico inusual",
+    "acceso denegado"
+  ]
+}

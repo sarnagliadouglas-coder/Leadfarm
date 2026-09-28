@@ -1,0 +1,661 @@
+"""angulo_mensagem.py — MVP de primeira mensagem por MODELO FIXO, com o
+ângulo escolhido por regra determinística (mudança de rumo decidida pelo
+diretor em 24/09/2026, interna ao COMERCIAL, sem mudar o contrato de
+entrada). Substitui, no fluxo da planilha de envio, a chamada de LLM da
+Etapa E2 (`pipeline_estrategia_mensagem.py`) e os templates antigos da pista
+Direta (`templates_direta.py`) — os dois continuam existindo no código e nos
+testes, só saem do fluxo (decisão do diretor).
+
+Nenhuma chamada de LLM aqui: os textos são fixos
+(`config/mensagens_angulo.json`), só os placeholders são preenchidos por
+programa. Toda mensagem passa pelo MESMO `validador_mensagem.validar_mensagem`
+das Etapas anteriores — reusado, não reimplementado.
+
+Ângulo por lead, nesta ordem (nata + candidatos_triagem):
+1. `contato` — `analise_tecnica_site.telefone_na_pagina` confirmado como
+   `"texto"` (não é link clicável).
+2. `poucas_avaliacoes` (renomeado de `reputacao` na sexta rodada de decisões
+   do diretor, 24/09/2026) — nota e avaliações confirmadas, nota >=
+   `nota_minima` (4,0 — NUNCA abaixo disso, nem por engano), avaliações entre
+   `avaliacoes_minimo` e `avaliacoes_maximo` (1 a 30), e existe pelo menos um
+   lead do MESMO nicho no lote inteiro (nata + candidatos_triagem +
+   descartados — na prática só os dois primeiros contribuem: `descartado`
+   não tem bloco `reputacao` no contrato) com avaliações >=
+   `multiplicador_concorrente_minimo` (10x) vezes as avaliações deste lead.
+   Duas faixas, dois textos (config/mensagens_angulo.json): 5 a 30
+   avaliações cita a nota; 1 a 4 não cita (só "todavía tiene solo N
+   reseña(s)").
+3. `lentidao` — `psi.lcp_ms` confirmado >= `lcp_minimo_ms`. O número de
+   segundos só entra na mensagem quando o PSI tem pelo menos
+   `rodadas_minimas_para_citar_numero` rodadas medidas (o contrato só guarda
+   o `lcp_ms` mais recente, não um histórico por rodada — a checagem usa
+   `rodadas` + o `lcp_ms` disponível, não uma verificação rodada a rodada;
+   ver limitação no RETORNO da tarefa); sem isso, o mesmo ângulo usa o texto
+   sem número.
+4. `sem_angulo` — nenhuma das anteriores. Sem mensagem.
+
+Pista Direta: `sem_site` (classe_site == "sem_site") ou `portal` (classe_site
+== "portal" — qualquer portal, não só Doctoralia; `{portal}` resolvido pelo
+domínio via `nomes_portal` da config, com o domínio cru como default) — os
+únicos dois com modelo neste MVP; qualquer outra classe sai como
+`sem_angulo`.
+
+Um ângulo que exige um fato ausente (ex.: `poucas_avaliacoes` sem nota/
+avaliações confirmadas) nunca é escolhido — "não inventa fato" vale aqui como
+em qualquer outra parte do COMERCIAL; a regra cai para a próxima da lista.
+
+Estrutura da mensagem (decisão do diretor, 27/09/2026 — as 4 mudanças
+conceituais): SAUDAÇÃO + ABERTURA da variante (A = serviço primeiro,
+controle; B = motivo do contato primeiro) + FATO + CONSEQUÊNCIA PLAUSÍVEL +
+CTA. Cada modelo de `config/mensagens_angulo.json` guarda os três blocos
+separados (`fato`, `consequencia` — pode ser `null` —, `cta`), e a carga
+confere a estrutura com `afirmacao.py` (fato e CTA sem afirmação de
+resultado; consequência obrigatoriamente IMPLICACAO_PLAUSIVEL). A
+consequência pode ser retirada sem invalidar o fato
+(`compor_mensagem(..., incluir_consequencia=False)`). O corpo é o MESMO nas
+duas variantes — só a abertura muda (`carregar_aberturas`), e
+`DistribuidorVariante` alterna A/B dentro de cada ângulo e canal.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Optional
+from urllib.parse import urlsplit
+
+try:
+    import validador_mensagem
+except ModuleNotFoundError:  # pragma: no cover - bootstrap de sys.path
+    import sys as _sys
+
+    _sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import validador_mensagem
+
+import afirmacao
+
+_CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
+CAMINHO_REGRAS_PADRAO = _CONFIG_DIR / "angulo_regras.json"
+CAMINHO_MENSAGENS_PADRAO = _CONFIG_DIR / "mensagens_angulo.json"
+CAMINHO_CIDADE_PADRAO = _CONFIG_DIR / "cidade_da_busca.json"
+CAMINHO_ABERTURAS_PADRAO = _CONFIG_DIR / "remetente_apresentacao.json"
+
+_CHAVES_REGRAS_OBRIGATORIAS = ("poucas_avaliacoes", "lentidao")
+MODELOS = (
+    "contato",
+    "poucas_avaliacoes_5_30", "poucas_avaliacoes_5_30_singular",
+    "poucas_avaliacoes_1_4", "poucas_avaliacoes_1_4_singular",
+    "lentidao", "lentidao_sem_numero",
+    "sem_site", "sem_site_sem_reputacao",
+    "portal", "portal_sem_reputacao",
+    "rede_social", "rede_social_sem_reputacao",
+    "construtor", "construtor_sem_reputacao",
+)
+VARIANTES = ("A", "B")
+
+_CHAVES_MENSAGENS_OBRIGATORIAS = (
+    "saudacao",
+    "contato",
+    "poucas_avaliacoes_5_30", "poucas_avaliacoes_5_30_singular",
+    "poucas_avaliacoes_1_4", "poucas_avaliacoes_1_4_singular",
+    "lentidao", "lentidao_sem_numero",
+    "sem_site", "sem_site_sem_reputacao",
+    "portal", "portal_sem_reputacao", "nomes_portal",
+    "rede_social", "rede_social_sem_reputacao", "nomes_rede",
+    "construtor", "construtor_sem_reputacao", "nomes_construtor",
+)
+
+ANGULOS_NATA = ("contato", "poucas_avaliacoes", "lentidao")
+SEM_ANGULO = "sem_angulo"
+
+
+class ConfigAnguloInvalidaError(Exception):
+    """`config/angulo_regras.json` ausente, ilegível ou incompleto."""
+
+
+class ConfigMensagensAnguloInvalidaError(Exception):
+    """`config/mensagens_angulo.json` ausente, ilegível ou incompleto."""
+
+
+class ConfigCidadeBuscaInvalidaError(Exception):
+    """`config/cidade_da_busca.json` ausente, ilegível ou incompleto."""
+
+
+class ConfigAberturasInvalidaError(Exception):
+    """`config/remetente_apresentacao.json` sem `variantes_abertura` A e B
+    utilizáveis."""
+
+
+def carregar_regras_angulo(caminho: Path = CAMINHO_REGRAS_PADRAO) -> dict:
+    caminho = Path(caminho)
+    try:
+        texto = caminho.read_text(encoding="utf-8")
+    except (FileNotFoundError, IsADirectoryError, PermissionError, OSError) as e:
+        raise ConfigAnguloInvalidaError(f"Config de regras de ângulo não encontrada em {caminho}: {e}") from e
+    try:
+        config = json.loads(texto)
+    except json.JSONDecodeError as e:
+        raise ConfigAnguloInvalidaError(f"Config de regras de ângulo em {caminho} não é JSON válido: {e}") from e
+    faltando = [c for c in _CHAVES_REGRAS_OBRIGATORIAS if c not in config]
+    if faltando:
+        raise ConfigAnguloInvalidaError(f"Config de regras de ângulo em {caminho} sem as chaves: {faltando}")
+    return config
+
+
+def carregar_mensagens_angulo(caminho: Path = CAMINHO_MENSAGENS_PADRAO, config_afirmacao: Optional[dict] = None) -> dict:
+    """Carrega os modelos e confere a estrutura fato -> consequência -> CTA
+    (`problemas_de_estrutura`) -- modelo fora da estrutura derruba a carga,
+    nunca gera mensagem. `config_afirmacao` omitido usa a chave `afirmacao`
+    de `config/validacao_mensagem.json`."""
+    caminho = Path(caminho)
+    try:
+        texto = caminho.read_text(encoding="utf-8")
+    except (FileNotFoundError, IsADirectoryError, PermissionError, OSError) as e:
+        raise ConfigMensagensAnguloInvalidaError(f"Config de mensagens de ângulo não encontrada em {caminho}: {e}") from e
+    try:
+        config = json.loads(texto)
+    except json.JSONDecodeError as e:
+        raise ConfigMensagensAnguloInvalidaError(f"Config de mensagens de ângulo em {caminho} não é JSON válido: {e}") from e
+    faltando = [c for c in _CHAVES_MENSAGENS_OBRIGATORIAS if c not in config]
+    if faltando:
+        raise ConfigMensagensAnguloInvalidaError(f"Config de mensagens de ângulo em {caminho} sem as chaves: {faltando}")
+    if config_afirmacao is None:
+        config_afirmacao = validador_mensagem.carregar_config().get("afirmacao")
+    problemas = problemas_de_estrutura(config, config_afirmacao)
+    if problemas:
+        raise ConfigMensagensAnguloInvalidaError(
+            f"Config de mensagens de ângulo em {caminho} fora da estrutura fato -> consequência -> CTA: {problemas}"
+        )
+    return config
+
+
+def problemas_de_estrutura(mensagens: dict, config_afirmacao: Optional[dict]) -> list:
+    """Confere cada modelo de `MODELOS` (decisão do diretor, 27/09/2026):
+    `fato` e `cta` strings não vazias, `cta` termina em "?", `consequencia`
+    string ou `null`. Com `config_afirmacao`: `fato` e `cta` nunca afirmam
+    resultado; `consequencia`, quando existe, é IMPLICACAO_PLAUSIVEL (nem
+    fato cru, nem resultado afirmado). Devolve a lista de problemas (vazia =
+    ok) -- nunca aceita em silêncio."""
+    problemas = []
+    for chave in MODELOS:
+        modelo = mensagens.get(chave)
+        if not isinstance(modelo, dict):
+            problemas.append(f"{chave}: não é um objeto com fato/consequencia/cta")
+            continue
+        for bloco in ("fato", "cta"):
+            if not isinstance(modelo.get(bloco), str) or not modelo[bloco].strip():
+                problemas.append(f"{chave}.{bloco}: ausente ou vazio")
+        consequencia = modelo.get("consequencia")
+        if consequencia is not None and (not isinstance(consequencia, str) or not consequencia.strip()):
+            problemas.append(f"{chave}.consequencia: deve ser texto não vazio ou null")
+            consequencia = None
+        cta = modelo.get("cta")
+        if isinstance(cta, str) and not cta.strip().endswith("?"):
+            problemas.append(f"{chave}.cta: não termina em '?'")
+        if not config_afirmacao:
+            continue
+        for bloco in ("fato", "cta"):
+            texto = modelo.get(bloco)
+            if isinstance(texto, str) and afirmacao.afirmacoes_de_resultado(texto, config_afirmacao):
+                problemas.append(f"{chave}.{bloco}: afirma resultado/causa não observado")
+        if consequencia is not None:
+            classe = afirmacao.classificar_texto(consequencia, config_afirmacao)
+            if classe != afirmacao.IMPLICACAO_PLAUSIVEL:
+                problemas.append(f"{chave}.consequencia: classificada como {classe}, não como IMPLICACAO_PLAUSIVEL")
+    return problemas
+
+
+def carregar_aberturas(caminho: Path = CAMINHO_ABERTURAS_PADRAO) -> dict:
+    """`{"A": {"nome", "texto"}, "B": {...}}` de
+    `config/remetente_apresentacao.json`, com `{segment_positioning}`
+    resolvido (decisão do diretor, 27/09/2026, mudanças 3 e 4)."""
+    caminho = Path(caminho)
+    try:
+        config = json.loads(caminho.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        raise ConfigAberturasInvalidaError(f"Config de aberturas ilegível em {caminho}: {e}") from e
+    variantes = config.get("variantes_abertura") or {}
+    segmento = (config.get("segment_positioning") or "").strip()
+    aberturas = {}
+    for v in VARIANTES:
+        item = variantes.get(v)
+        if not isinstance(item, dict) or not isinstance(item.get("texto"), str) or not item.get("nome"):
+            raise ConfigAberturasInvalidaError(f"Config de aberturas em {caminho} sem a variante {v!r} (nome + texto)")
+        texto = item["texto"]
+        if "{segment_positioning}" in texto and not segmento:
+            raise ConfigAberturasInvalidaError(
+                f"Variante {v!r} usa {{segment_positioning}}, mas a chave está vazia em {caminho}"
+            )
+        aberturas[v] = {"nome": item["nome"], "texto": texto.replace("{segment_positioning}", segmento)}
+    return aberturas
+
+
+class DistribuidorVariante:
+    """Alterna A/B dentro de cada estrato (ângulo, canal), na ordem das
+    linhas -- determinístico, sem sorteio (decisão do diretor, 27/09/2026:
+    "A e B devem receber tipos semelhantes de leads"). `proxima` só consulta;
+    `confirmar` conta a mensagem de fato gerada -- mensagem rejeitada pelo
+    validador não desequilibra o estrato.
+
+    Equilíbrio global (decisão do diretor, 28/09/2026): cada estrato NOVO
+    começa pela variante que está em falta no total já confirmado (empate =
+    A). Sem isso, todo estrato ímpar ou de um lead só começava em A -- no
+    pacote de 27/09 deu 37 A x 30 B. Dentro do estrato a alternância segue
+    igual."""
+
+    def __init__(self):
+        self._contagem = {}
+        self._inicio = {}
+        self._total = {v: 0 for v in VARIANTES}
+
+    def _variante_em_falta(self) -> str:
+        return min(VARIANTES, key=lambda v: (self._total[v], VARIANTES.index(v)))
+
+    def proxima(self, angulo: str, canal: str) -> str:
+        estrato = (angulo, canal)
+        inicio = self._inicio.get(estrato)
+        if inicio is None:
+            inicio = VARIANTES.index(self._variante_em_falta())
+        return VARIANTES[(inicio + self._contagem.get(estrato, 0)) % len(VARIANTES)]
+
+    def confirmar(self, angulo: str, canal: str) -> None:
+        estrato = (angulo, canal)
+        variante = self.proxima(angulo, canal)
+        self._inicio.setdefault(estrato, VARIANTES.index(variante))
+        self._contagem[estrato] = self._contagem.get(estrato, 0) + 1
+        self._total[variante] += 1
+
+    def totais(self) -> dict:
+        return dict(self._total)
+
+
+def carregar_cidade_busca(caminho: Path = CAMINHO_CIDADE_PADRAO) -> str:
+    """Devolve a `cidade` configurada (pode ser vazia). O diretor edita este
+    arquivo à mão; usada em `{onde}` da mensagem de `poucas_avaliacoes`."""
+    caminho = Path(caminho)
+    try:
+        texto = caminho.read_text(encoding="utf-8")
+    except (FileNotFoundError, IsADirectoryError, PermissionError, OSError) as e:
+        raise ConfigCidadeBuscaInvalidaError(f"Config de cidade da busca não encontrada em {caminho}: {e}") from e
+    try:
+        config = json.loads(texto)
+    except json.JSONDecodeError as e:
+        raise ConfigCidadeBuscaInvalidaError(f"Config de cidade da busca em {caminho} não é JSON válido: {e}") from e
+    if "cidade" not in config:
+        raise ConfigCidadeBuscaInvalidaError(f"Config de cidade da busca em {caminho} sem a chave 'cidade'.")
+    return config["cidade"] or ""
+
+
+# --- preenchimento de placeholders ------------------------------------------
+
+
+def _formatar_apresentacao(apresentacao: Optional[str]) -> str:
+    """Abertura pronta para colar depois da saudação -- espaço na frente,
+    ponto final se faltar (":" também encerra: abertura B). Vazio/`None`
+    devolve string vazia (mensagem sai sem apresentação nenhuma)."""
+    texto = (apresentacao or "").strip()
+    if not texto:
+        return ""
+    if not texto.endswith((".", "!", "?", ":")):
+        texto += "."
+    return f" {texto}"
+
+
+def compor_mensagem(
+    modelo: dict, saudacao: str, apresentacao: Optional[str], *, incluir_consequencia: bool = True, **valores,
+) -> str:
+    """SAUDAÇÃO + ABERTURA + FATO + CONSEQUÊNCIA + CTA. O fato começa em
+    minúscula no modelo: segue assim depois de abertura terminada em ":",
+    sobe a primeira letra nos demais casos. `incluir_consequencia=False`
+    tira só a consequência -- fato e CTA ficam intactos (critério de
+    aceitação da mudança 2)."""
+    abertura = _formatar_apresentacao(apresentacao)
+    partes = [modelo["fato"].format(**valores)]
+    if incluir_consequencia and modelo.get("consequencia"):
+        partes.append(modelo["consequencia"].format(**valores))
+    partes.append(modelo["cta"].format(**valores))
+    corpo = " ".join(partes)
+    if not abertura.endswith(":"):
+        corpo = corpo[:1].upper() + corpo[1:]
+    return f"{saudacao}{abertura} {corpo}"
+
+
+def _formatar_nota(nota) -> str:
+    return f"{float(nota):.1f}".replace(".", ",")
+
+
+def _arredondar_para_baixo_estrito(valor: int) -> int:
+    """Arredonda para a dezena (< 100) ou centena (>= 100) mais próxima por
+    baixo, garantindo ESTRITAMENTE menor que `valor` -- para que "más de N"
+    citado na mensagem seja sempre literalmente verdade, mesmo quando
+    `valor` já é um múltiplo exato do passo (ex.: 40 -> 30, nunca 40)."""
+    passo = 100 if valor >= 100 else 10
+    piso = (valor // passo) * passo
+    if piso >= valor:
+        piso -= passo
+    return max(piso, 0)
+
+
+def _hostname(site_url: Optional[str]) -> Optional[str]:
+    if not site_url:
+        return None
+    bruto = site_url if "://" in site_url else f"//{site_url}"
+    host = urlsplit(bruto).netloc.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return host or None
+
+
+def _nome_por_dominio(site_url: Optional[str], mapa_nomes: dict) -> str:
+    """Nome legível a partir do domínio do site (`mapa_nomes` da config --
+    `nomes_portal` para `portal`, `nomes_rede` para `rede_social`; ex.:
+    `doctoralia.es` -> `Doctoralia`, `instagram.com` -> `Instagram`).
+    Domínio desconhecido ou ausente: o próprio domínio, sem "www." (nunca
+    inventa um nome bonito)."""
+    host = _hostname(site_url)
+    if not host:
+        return ""
+    if host in mapa_nomes:
+        return mapa_nomes[host]
+    for dominio, nome in mapa_nomes.items():
+        if host.endswith("." + dominio):
+            return nome
+    return host
+
+
+# --- ângulo "contato" --------------------------------------------------------
+
+
+def _telefone_na_pagina_e_texto(lead) -> bool:
+    campo = lead.get("analise_tecnica_site", {}).get("telefone_na_pagina")
+    return bool(campo) and hasattr(campo, "presente") and campo.presente() and campo.valor_confirmado == "texto"
+
+
+# --- ângulo "poucas_avaliacoes" ----------------------------------------------
+
+
+def _nota_e_avaliacoes_confirmadas(lead) -> Optional[tuple]:
+    reputacao = lead.get("reputacao") or {}
+    nota = reputacao.get("nota_google")
+    avaliacoes = reputacao.get("review_count")
+    if not (nota and hasattr(nota, "presente") and nota.presente()):
+        return None
+    if not (avaliacoes and hasattr(avaliacoes, "presente") and avaliacoes.presente()):
+        return None
+    return nota.valor_confirmado, avaliacoes.valor_confirmado
+
+
+def _nicho_e_avaliacoes_concorrente(lead_ou_descartado) -> tuple:
+    """`(nicho, avaliacoes)` -- `avaliacoes` é `None` quando o lead não tem
+    reputação confirmada (inclusive `descartado`, que nem tem o bloco no
+    contrato)."""
+    identidade = lead_ou_descartado.get("identidade") or {}
+    nicho = identidade.get("nicho")
+    reputacao = lead_ou_descartado.get("reputacao")
+    avaliacoes = None
+    if reputacao:
+        review_count = reputacao.get("review_count")
+        if review_count is not None and hasattr(review_count, "presente") and review_count.presente():
+            avaliacoes = review_count.valor_confirmado
+    return nicho, avaliacoes
+
+
+def _concorrentes_qualificados(lead, leads_do_lote: list, multiplicador: float) -> list:
+    """Avaliações de todo lead do MESMO nicho (place_id diferente) no lote
+    inteiro (nata + candidatos_triagem + descartados) com
+    avaliações >= multiplicador * avaliações deste lead."""
+    _, avaliacoes_proprias = _nicho_e_avaliacoes_concorrente(lead)
+    nicho_proprio = lead.get("identidade", {}).get("nicho")
+    if not nicho_proprio or avaliacoes_proprias is None:
+        return []
+    place_id_proprio = lead.get("place_id")
+    limiar = multiplicador * avaliacoes_proprias
+    qualificados = []
+    for outro in leads_do_lote:
+        if outro.get("place_id") == place_id_proprio:
+            continue
+        nicho_outro, avaliacoes_outro = _nicho_e_avaliacoes_concorrente(outro)
+        if nicho_outro == nicho_proprio and avaliacoes_outro is not None and avaliacoes_outro >= limiar:
+            qualificados.append(avaliacoes_outro)
+    return qualificados
+
+
+def _elegivel_para_poucas_avaliacoes(nota, avaliacoes, regras_poucas_avaliacoes: dict) -> bool:
+    return (
+        nota >= regras_poucas_avaliacoes["nota_minima"]
+        and regras_poucas_avaliacoes["avaliacoes_minimo"] <= avaliacoes <= regras_poucas_avaliacoes["avaliacoes_maximo"]
+    )
+
+
+# --- ângulo "lentidao" -------------------------------------------------------
+
+
+def _lcp_ms_confirmado(lead) -> Optional[int]:
+    psi = lead.get("psi")
+    if isinstance(psi, dict) and psi.get("estado") == "CONFIRMADO_PRESENTE":
+        lcp_ms = psi.get("lcp_ms")
+        if isinstance(lcp_ms, (int, float)):
+            return int(lcp_ms)
+    return None
+
+
+def _medicao_consistente_para_citar_numero(lead, rodadas_minimas: int) -> bool:
+    """`True` só quando o PSI tem pelo menos `rodadas_minimas` rodadas
+    medidas. O contrato só guarda o `lcp_ms` mais recente (não um histórico
+    por rodada) -- não dá para checar "todas as rodadas >= 10000ms"
+    literalmente; esta função usa `rodadas` como proxy de medição
+    consistente, combinado com o `lcp_ms` disponível (ver limitação no
+    RETORNO da tarefa)."""
+    psi = lead.get("psi")
+    if not isinstance(psi, dict):
+        return False
+    rodadas = psi.get("rodadas") or 0
+    return isinstance(rodadas, (int, float)) and rodadas >= rodadas_minimas
+
+
+# --- escolha do ângulo (nata + candidatos_triagem) --------------------------
+
+
+def escolher_angulo_nata(lead, leads_do_lote: list, regras: dict) -> str:
+    """`leads_do_lote` é a lista completa usada para o cruzamento de
+    concorrente do ângulo `poucas_avaliacoes` (nata + candidatos_triagem +
+    descartados) -- inclui o próprio `lead`, que é excluído por `place_id`
+    dentro de `_concorrentes_qualificados`."""
+    if _telefone_na_pagina_e_texto(lead):
+        return "contato"
+
+    regras_poucas_avaliacoes = regras["poucas_avaliacoes"]
+    confirmadas = _nota_e_avaliacoes_confirmadas(lead)
+    if confirmadas is not None:
+        nota, avaliacoes = confirmadas
+        if _elegivel_para_poucas_avaliacoes(nota, avaliacoes, regras_poucas_avaliacoes):
+            if _concorrentes_qualificados(lead, leads_do_lote, regras_poucas_avaliacoes["multiplicador_concorrente_minimo"]):
+                return "poucas_avaliacoes"
+
+    lcp_ms = _lcp_ms_confirmado(lead)
+    if lcp_ms is not None and lcp_ms >= regras["lentidao"]["lcp_minimo_ms"]:
+        return "lentidao"
+
+    return SEM_ANGULO
+
+
+# --- escolha do ângulo (pista Direta) ---------------------------------------
+
+
+def escolher_angulo_direta(linha_csv: dict) -> str:
+    """`linha_csv` é uma linha do CSV humano (`classe_site`). `portal`
+    (sexta rodada, 24/09/2026) substitui o `doctoralia` específico -- vale
+    para QUALQUER portal (o `{portal}` da mensagem é resolvido pelo domínio,
+    não a escolha do ângulo). `rede_social` e `construtor` entraram na
+    oitava rodada (25/09/2026, go-live) -- eram as duas classes que ainda
+    ficavam `sem_angulo` na Direta. `superficie_google` (página gratuita do
+    Google) reusa os modelos de `sem_site` -- mesmo texto, mesma checagem."""
+    classe = linha_csv.get("classe_site")
+    if classe in ("sem_site", "superficie_google"):
+        return "sem_site"
+    if classe == "portal":
+        return "portal"
+    if classe == "rede_social":
+        return "rede_social"
+    if classe == "construtor":
+        return "construtor"
+    return SEM_ANGULO
+
+
+# --- montagem + validação da mensagem ---------------------------------------
+
+
+def montar_mensagem_nata(
+    angulo: str, lead, leads_do_lote: list, *, apresentacao: str, regras: dict, mensagens: dict,
+    incluir_consequencia: bool = True,
+) -> tuple:
+    """Devolve `(mensagem, entrada_derivada)` para os ângulos `contato`,
+    `poucas_avaliacoes` e `lentidao`. `apresentacao` é o texto da ABERTURA
+    da variante (A ou B -- `carregar_aberturas`); o corpo não depende dela.
+    `entrada_derivada` é o dict mínimo com só os números que a mensagem pode
+    citar -- usado por `validar_mensagem_angulo` (checagem 7, "número fora
+    da entrada", reusada sem reimplementar). Ângulo sem os fatos necessários
+    (ex.: `poucas_avaliacoes` chamado sem nota/avaliações confirmadas)
+    levanta `ValueError` -- quem chama já garantiu isso ao escolher o ângulo
+    com `escolher_angulo_nata`.
+
+    `poucas_avaliacoes` (décima rodada, 27/09/2026): o concorrente do mesmo
+    nicho com 10x as avaliações continua sendo a EVIDÊNCIA que escolhe o
+    ângulo e decide singular/plural ("otra"/"otras"), mas a mensagem não
+    cita mais categoria, cidade nem o número do concorrente -- só o fato do
+    próprio lead e a consequência plausível ("puede encontrarse con otras
+    que tienen muchas más reseñas")."""
+    saudacao = mensagens["saudacao"]
+
+    def compor(chave, **valores):
+        return compor_mensagem(
+            mensagens[chave], saudacao, apresentacao, incluir_consequencia=incluir_consequencia, **valores,
+        )
+
+    if angulo == "contato":
+        return compor("contato"), {}
+
+    if angulo == "poucas_avaliacoes":
+        confirmadas = _nota_e_avaliacoes_confirmadas(lead)
+        if confirmadas is None:
+            raise ValueError("ângulo 'poucas_avaliacoes' sem nota/avaliações confirmadas")
+        nota, avaliacoes = confirmadas
+        concorrentes = _concorrentes_qualificados(
+            lead, leads_do_lote, regras["poucas_avaliacoes"]["multiplicador_concorrente_minimo"]
+        )
+        if not concorrentes:
+            raise ValueError("ângulo 'poucas_avaliacoes' sem concorrente qualificado no lote")
+        nota_fmt = _formatar_nota(nota)
+        sufixo = "_singular" if len(concorrentes) == 1 else ""
+        if avaliacoes >= 5:
+            mensagem = compor(f"poucas_avaliacoes_5_30{sufixo}", nota=nota_fmt, n=avaliacoes)
+            return mensagem, {"nota_google": nota_fmt, "avaliacoes_google": avaliacoes}
+        reseñas_palavra = "reseña" if avaliacoes == 1 else "reseñas"
+        mensagem = compor(f"poucas_avaliacoes_1_4{sufixo}", n=avaliacoes, reseñas_palavra=reseñas_palavra)
+        return mensagem, {"nota_google": nota_fmt, "avaliacoes_google": avaliacoes}
+
+    if angulo == "lentidao":
+        lcp_ms = _lcp_ms_confirmado(lead)
+        if lcp_ms is None:
+            raise ValueError("ângulo 'lentidao' sem LCP confirmado")
+        rodadas_minimas = regras["lentidao"]["rodadas_minimas_para_citar_numero"]
+        if _medicao_consistente_para_citar_numero(lead, rodadas_minimas):
+            segundos = round(lcp_ms / 1000)
+            return compor("lentidao", s=segundos), {"segundos": segundos}
+        return compor("lentidao_sem_numero"), {}
+
+    raise ValueError(f"ângulo sem modelo de mensagem: {angulo!r}")
+
+
+def _nota_e_avaliacoes_csv(linha_csv: dict) -> tuple:
+    """`(nota, avaliacoes)` a partir das colunas `nota`/`avaliacoes` do CSV
+    humano, ou `(None, None)` quando alguma das duas não vem confirmada
+    (célula vazia ou não numérica) -- nunca inventa."""
+    try:
+        nota = float(str(linha_csv.get("nota")).replace(",", "."))
+        avaliacoes = int(float(str(linha_csv.get("avaliacoes")).replace(",", ".")))
+    except (TypeError, ValueError):
+        return None, None
+    return nota, avaliacoes
+
+
+def montar_mensagem_direta(
+    angulo: str, linha_csv: dict, *, apresentacao: str, mensagens: dict, incluir_consequencia: bool = True,
+) -> tuple:
+    """Devolve `(mensagem, entrada_derivada)` para `sem_site`/`portal`/
+    `rede_social`/`construtor`. `apresentacao` é a ABERTURA da variante.
+    Quando nota/avaliações não estão confirmadas no CSV humano (colunas
+    `nota`/`avaliacoes`) OU as avaliações são 0, usa a variante "sem
+    reputação" (decisão do diretor, 24/09/2026, sétima rodada).
+    `{portal}`/`{rede}`/`{constructor}` são o nome legível pelo domínio do
+    site (`nomes_portal`/`nomes_rede`/`nomes_construtor` da config --
+    domínio desconhecido usa o próprio host, sem "https://" nem "www.").
+    `constructor` entra em `entrada_derivada` porque pode conter dígitos que
+    a mensagem cita (checagem 7 do validador, "número fora da entrada").
+
+    `construtor` só existe porque o QUALIFICADOR classifica pelo HOST da URL
+    (`qualificador/prospeccao_ia/site_classificacao.py`: subdomínio de
+    wordpress.com, wixsite.com, ...) -- "sin dominio propio" é fato
+    observado no endereço, não inferência a partir da plataforma (decisão do
+    diretor, 27/09/2026, item 4)."""
+    if angulo not in ("sem_site", "portal", "rede_social", "construtor"):
+        raise ValueError(f"ângulo sem modelo de mensagem direta: {angulo!r}")
+
+    saudacao = mensagens["saudacao"]
+    nota, avaliacoes = _nota_e_avaliacoes_csv(linha_csv)
+    sem_reputacao = nota is None or avaliacoes is None or avaliacoes == 0
+    chave = f"{angulo}_sem_reputacao" if sem_reputacao else angulo
+
+    valores = {}
+    entrada_derivada = {}
+    if not sem_reputacao:
+        nota_fmt = _formatar_nota(nota)
+        valores.update(nota=nota_fmt, n=avaliacoes)
+        entrada_derivada.update(nota_google=nota_fmt, avaliacoes_google=avaliacoes)
+    if angulo == "portal":
+        valores["portal"] = _nome_por_dominio(linha_csv.get("site"), mensagens.get("nomes_portal", {}))
+    elif angulo == "rede_social":
+        valores["rede"] = _nome_por_dominio(linha_csv.get("site"), mensagens.get("nomes_rede", {}))
+    elif angulo == "construtor":
+        constructor = _nome_por_dominio(linha_csv.get("site"), mensagens.get("nomes_construtor", {}))
+        valores["constructor"] = constructor
+        entrada_derivada["constructor"] = constructor
+
+    mensagem = compor_mensagem(
+        mensagens[chave], saudacao, apresentacao, incluir_consequencia=incluir_consequencia, **valores,
+    )
+    return mensagem, entrada_derivada
+
+
+def palavras_genericas_nome(*frases: Optional[str]) -> list:
+    """Junta `frases` (nicho do lead, cidade da busca, ...) numa lista de
+    "palavras genéricas" para `validar_mensagem_angulo` -- um trecho do nome
+    do lead formado SÓ por essas palavras (mais as conectoras fixas do
+    validador) não é tratado como o nome do negócio vazando na mensagem
+    (decisão do diretor, 25/09/2026, oitava rodada: "Psicólogo en Alicante"
+    -- nicho + cidade da busca -- é falso positivo quando o modelo de
+    `poucas_avaliacoes` legitimamente diz "quien busca psicólogo en
+    Alicante"). `None`/vazio é ignorado."""
+    return [f for f in frases if f]
+
+
+def validar_mensagem_angulo(
+    mensagem: str, angulo: str, entrada_derivada: dict, *, nome_negocio=None, config_validacao=None,
+    palavras_genericas_nome: Optional[list] = None,
+):
+    """Roda `mensagem` pelo MESMO `validador_mensagem.validar_mensagem` das
+    Etapas anteriores -- saudação, sem preço, sem URL, usted, sem nome do
+    negócio, termina em "?", limite de palavras, termos proibidos (inclusive
+    a consequência genérica de "perder pacientes" e a inferência indevida de
+    "todas las reseñas son de 5 estrellas", 24/09/2026) e todo número citado
+    precisa existir em `entrada_derivada` (nunca um número inventado).
+    `palavras_genericas_nome` (ver `angulo_mensagem.palavras_genericas_nome`)
+    evita o falso positivo da checagem de nome contra nicho/cidade."""
+    texto_resposta = json.dumps(
+        {"estrategia": angulo, "canal_sugerido": "whatsapp", "mensagem_1": mensagem, "fato_usado": angulo},
+        ensure_ascii=False,
+    )
+    return validador_mensagem.validar_mensagem(
+        texto_resposta, entrada_derivada, config=config_validacao, nome_negocio=nome_negocio,
+        palavras_genericas_nome=palavras_genericas_nome,
+    )

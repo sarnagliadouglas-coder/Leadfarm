@@ -1,0 +1,16 @@
+pytest
+
+# Primeira dependência externa de runtime do projeto (antes: só stdlib). Usada em
+# fase_saida para validar o contrato QUALIFICADOR -> COMERCIAL contra o JSON Schema
+# formal antes de gravar. Rompe o "zero-dependency" de propósito -- decisão da direção.
+jsonschema>=4.18
+
+# OPCIONAL -- medição do site com JavaScript renderizado (site_renderizado.py e a fase
+# de renderização). O QUALIFICADOR funciona exatamente como antes SEM esta linha: nenhum
+# módulo importa Playwright no topo, e sem ele a fase fica indisponível com motivo
+# explícito (nunca erro cru). Decisão do diretor, 20/09/2026 (Etapa C, Q2).
+# Instalação, nesta ordem (o pacote não traz o navegador):
+#     pip install -r requirements.txt
+#     playwright install chromium
+# Para um ambiente sem renderização, instale só: pytest e jsonschema>=4.18.
+playwright>=1.44

@@ -1,0 +1,85 @@
+# === LeadFarm — .gitignore da raiz (marco zero) ===
+
+# --- Segredos e ambiente ---
+.env
+.env.*
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# --- Node ---
+node_modules/
+
+# --- Artefatos de build ---
+dist/
+build/
+*.egg-info/
+
+# --- Configurações locais ---
+.claude/settings.local.json
+**/.claude/settings.local.json
+
+# --- Artefatos de extração (não versionar nesta rodada) ---
+extrator/files/
+
+# --- Artefatos de ferramentas locais (MCP / Playwright) ---
+.playwright-mcp/
+mcp_output/
+
+# --- Temporários e logs locais ---
+*.log
+*.tmp
+*.bak
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- Dados operacionais e saídas geradas por execução (nunca versionar) ---
+# Pipeline transversal do EQC (lotes, sidecars, dossiês, diagnósticos)
+EQC/pipeline/
+# Dados do QUALIFICADOR (leads coletados/qualificados, imports, arquivos, backups)
+qualificador/prospeccao_ia/data/
+# Saídas operacionais do COMERCIAL (piloto A1: dossiês, diagnósticos, fatos técnicos, screenshots)
+comercial/_piloto_a1/diagnosticos/
+comercial/_piloto_a1/dossies/
+comercial/_piloto_a1/fatos_tecnicos/
+# Scripts do piloto com dados de 3 leads reais escritos no codigo -- ficam so no disco (decisao do diretor, 28/09/2026).
+comercial/_piloto_a1/construir_dossies.py
+comercial/_piloto_a1/construir_diagnosticos.py
+# Registro de consumo de chamadas à API da Anthropic (Etapa E1) — dado operacional
+comercial/_consumo_llm/
+# Saída de rodadas de estratégia + mensagem (Etapa E2) — dado operacional
+comercial/_mensagens/
+# Planilha de envio (Etapa E2b) — dado operacional
+comercial/_planilhas/
+# Registro de abordados (Etapa F mínima) — dado operacional
+comercial/_abordagens/
+# CSVs operacionais de leads / extração
+extrator/maps-leads-*.csv
+**/maps-leads-*.csv
+extrator_*.csv
+# Sidecars e planilhas operacionais
+*.meta.json
+*.xlsx
+# Exemplos/screenshots operacionais avulsos do COMERCIAL
+comercial/desktop_example.png
+comercial/mobile_example.png
+
+# Porta local para outro agente (Codex) — não versionada até haver decisão
+# de desenho multi-ferramenta (canônico + gerados, não N cópias completas)
+AGENTS.md
+
+# Artefatos descartáveis da Etapa 1 (fumaça do Anexo A, GUIA-IMPLEMENTACAO.md)
+# — criados e removidos na mesma rodada, nunca versionados
+.claude/agents/piloto-*
+.claude/skills/piloto-*
+.claude/hooks/piloto_hook*
+piloto-camadas-teste/
+
+# EXTRATOR (extensao que le o Google Maps) fica so no disco -- fora do repositorio publico
+# (decisao do diretor, 28/09/2026: termos de uso do Google + protecao de dados).
+extrator/

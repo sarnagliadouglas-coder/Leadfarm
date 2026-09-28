@@ -1,0 +1,20 @@
+{
+  "_anotado_em": "2026-09-24",
+  "_nota": "Templates da mensagem sugerida para a pista Direta (Etapa E2b, planilha de envio). Chave = classe_site do contrato (sem_site, superficie_google, portal, rede_social, construtor). Editar aqui, nunca no codigo. Sem {nome} (decisao do diretor, 24/09/2026, quarta rodada -- 'Vi {nome} en Google Maps' virou 'Vi su perfil en Google Maps'; o nome do negocio nunca aparece na mensagem). {apresentacao} vem de config/remetente_apresentacao.json (vazio por padrao). {elogio} so entra quando nota_google_minima/avaliacoes_minimas de config/entrada_estrategia.json forem batidos -- reusa o mesmo limiar da Etapa E2, nunca um segundo numero. {portal}/{rede} vem de nomes_dominio (pelo dominio do site); sem entrada no mapa, cai no rotulo derivado do proprio dominio. {dominio} e o hostname cru do site (ex.: negocio.wixsite.com).",
+  "templates": {
+    "sem_site": "Hola, buenas.{apresentacao} Vi su perfil en Google Maps{elogio}. Noté que no tiene página web propia. ¿Le interesa que le muestre cómo podría verse la suya?",
+    "superficie_google": "Hola, buenas.{apresentacao} Vi su perfil en Google Maps{elogio}. Noté que no tiene página web propia. ¿Le interesa que le muestre cómo podría verse la suya?",
+    "portal": "Hola, buenas.{apresentacao} Vi su perfil en Google Maps{elogio}. Noté que su presencia en internet es un perfil en {portal}, sin web propia. ¿Le interesa ver cómo sería tener la suya?",
+    "rede_social": "Hola, buenas.{apresentacao} Vi su perfil en Google Maps{elogio}. Noté que su presencia en internet es su perfil de {rede}, sin web propia. ¿Le interesa ver cómo sería tener la suya?",
+    "construtor": "Hola, buenas.{apresentacao} Vi su perfil en Google Maps{elogio}. Noté que su web usa una dirección gratuita ({dominio}). ¿Le interesa ver cómo quedaría con un dominio propio?"
+  },
+  "elogio_template": ", con {nota} estrellas y {avaliacoes} reseñas, enhorabuena",
+  "nomes_dominio": {
+    "doctoralia.es": "Doctoralia",
+    "doctoralia.com": "Doctoralia",
+    "booksy.com": "Booksy",
+    "paginasamarillas.es": "Páginas Amarillas",
+    "instagram.com": "Instagram",
+    "facebook.com": "Facebook"
+  }
+}

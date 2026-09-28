@@ -1,0 +1,9 @@
+# Segredos -- NUNCA versionar. Use .env.example como modelo.
+.env
+.env.*
+!.env.example
+
+# Caches
+__pycache__/
+*.pyc
+.pytest_cache/

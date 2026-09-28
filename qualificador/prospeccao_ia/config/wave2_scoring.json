@@ -1,0 +1,64 @@
+{
+    "http": {
+        "timeout_seconds": 8,
+        "max_bytes": 300000,
+        "user_agent": "Mozilla/5.0 (compatible; ProspeccaoBot/1.0)"
+    },
+    "commercial_fit": {
+        "weights": {
+            "reputation_strong": 35,
+            "reputation_moderate": 20,
+            "reputation_unknown": 15,
+            "reputation_weak": 5,
+            "reviews_high": 20,
+            "reviews_medium": 15,
+            "reviews_low": 8,
+            "reviews_minimal": 3,
+            "reviews_none": 0,
+            "sinal_valorizado_presente": 10,
+            "cidade_prioritaria": 15,
+            "tem_telefone": 5,
+            "tem_email": 5
+        },
+        "reviews_bands": {"high": 100, "medium": 30, "low": 5, "minimal": 1}
+    },
+    "website_opportunity": {
+        "weights": {
+            "no_viewport_meta": 20,
+            "no_title_or_short": 10,
+            "no_meta_description": 10,
+            "no_cta_keyword": 15,
+            "no_conversion_path": 20,
+            "no_legal_page_link": 5,
+            "no_lang_attribute": 5,
+            "images_missing_alt": 5,
+            "slow_response": 10
+        },
+        "thresholds": {
+            "short_title_chars": 15,
+            "slow_response_ms": 3000
+        }
+    },
+    "priority_weights": {"commercial_fit": 0.5, "website_opportunity": 0.5},
+    "priority_thresholds": {"alta": 65, "media": 40},
+    "gbp_diagnostic": {
+        "weights": {
+            "no_ficha_reivindicada": 28,
+            "no_horario": 24,
+            "no_foto_destaque": 22,
+            "no_descricao": 16,
+            "no_faixa_preco": 10
+        },
+        "informational_only": ["tem_dono_listado", "tem_plus_code"],
+        "health_check": {
+            "sample_floor": 15,
+            "hard_zero_min_n": 15,
+            "near_zero_rate": 0.02,
+            "near_zero_min_n": 50
+        }
+    },
+    "batch_size": null,
+    "top_n_display": 15,
+    "max_retry_attempts": 3,
+    "max_runtime_seconds": null
+}

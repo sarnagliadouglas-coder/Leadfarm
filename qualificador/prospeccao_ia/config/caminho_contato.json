@@ -1,0 +1,31 @@
+{
+  "versao": 1,
+  "descricao": "Palavras que indicam link/botao de contato ou de agendamento, e dominios de agendamento conhecidos que podem ser abertos mesmo fora do dominio do proprio site. Usado por site_renderizado.py para 'seguir o caminho de contato' (Etapa C, passo C4b) quando a pagina inicial nao mostrou contato estrutural nem em texto. Entradas normalizadas: minusculas, sem acento, espacos simples (mesma normalizacao de config/antibot_textos.json).",
+  "copiado_em": "2026-09-22",
+  "fontes": {
+    "decisao_c4b": {
+      "origem": "Decisao do diretor, 22/09/2026 (Etapa C, passo C4b): lista de palavras de contato/agendamento no prompt; dominios de agendamento conhecidos escolhidos por conhecimento de mercado espanhol de agendamento online (nao medido nesta lista).",
+      "copiado_em": "2026-09-22",
+      "calibrada": false
+    }
+  },
+  "palavras_contato": [
+    "contacto", "contactanos", "contactar", "contactenos", "contacta",
+    "reserva", "reservar", "reserva tu cita", "reservar cita",
+    "cita", "pedir cita", "pide cita", "solicitar cita", "solicita tu cita",
+    "agendar", "agenda tu cita", "llamanos", "llamar", "escribenos",
+    "contact", "contact us", "book now", "book", "booking"
+  ],
+  "palavras_agendamento": [
+    "reserva", "reservar", "reserva tu cita", "reservar cita",
+    "cita", "pedir cita", "pide cita", "solicitar cita", "solicita tu cita",
+    "agendar", "agenda tu cita", "book now", "book", "booking",
+    "pedir hora", "solicitar turno", "reservar hora"
+  ],
+  "dominios_agendamento_conhecidos": [
+    "calendly.com", "cal.com", "acuityscheduling.com", "squareup.com",
+    "setmore.com", "simplybook.me", "timify.com", "fresha.com",
+    "treatwell.es", "treatwell.com", "booksy.com", "doctoralia.es",
+    "doctoralia.com", "topdoctors.es"
+  ]
+}

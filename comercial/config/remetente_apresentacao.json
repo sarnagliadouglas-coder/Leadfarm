@@ -1,0 +1,16 @@
+{
+  "_anotado_em": "2026-09-27",
+  "_nota": "'apresentacao' é a apresentação usada até 26/09/2026 -- continua lida pelos templates antigos da pista Direta (templates_direta.py, fora do fluxo) e é, por definição, o texto do CONTROLE (A) do teste de abertura. 'variantes_abertura' (decisão do diretor, 27/09/2026, mudança 4): A = serviço primeiro (controle), B = motivo do contato primeiro. O corpo da mensagem é o MESMO nas duas -- só a abertura muda. '{segment_positioning}' é resolvido por angulo_mensagem.carregar_aberturas a partir de 'segment_positioning' -- trocar o segmento é editar só essa chave, sem reescrever modelo nenhum. Abertura terminada em ':' faz o fato seguir em minúscula.",
+  "apresentacao": "Soy Douglas Fonseca, hago webs para consultas de salud y les ayudo con su ficha de Google.",
+  "segment_positioning": "profesionales",
+  "variantes_abertura": {
+    "A": {
+      "nome": "service_first",
+      "texto": "Soy Douglas Fonseca, hago webs para consultas de salud y les ayudo con su ficha de Google."
+    },
+    "B": {
+      "nome": "problem_first",
+      "texto": "Soy Douglas Fonseca, trabajo con webs para {segment_positioning}. Estuve revisando su presencia online y vi algo concreto que quería comentarle:"
+    }
+  }
+}

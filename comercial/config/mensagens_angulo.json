@@ -1,0 +1,97 @@
+{
+  "_anotado_em": "2026-09-27",
+  "_nota": "Modelos FIXOS de primeira mensagem por ângulo (MVP, mudança de rumo decidida pelo diretor em 24/09/2026 -- angulo_mensagem.py). Texto exato aprovado pelo diretor -- editar aqui é editar copy, mesmo cuidado do prompt de IA, mas SEM chamada de LLM nenhuma. {apresentacao} já vem formatado (espaço na frente + ponto no fim) por angulo_mensagem._formatar_apresentacao. Sexta rodada de decisões do diretor (24/09/2026): 'reputacao'/'reputacao_singular' viraram 'poucas_avaliacoes_5_30'/'poucas_avaliacoes_1_4' (+ variantes '_singular', quando só 1 concorrente qualificado -- 've otra' em vez de 've otras') -- a faixa 1-4 avaliações não cita a nota, só {reseñas_palavra} ('reseña' no singular, quando n==1, ou 'reseñas'); 'doctoralia' virou 'portal' (genérico, {portal} resolvido por 'nomes_portal' a partir do domínio do site -- domínio desconhecido usa o próprio domínio, sem 'www.'); 'lentidao_sem_numero' é usada quando o PSI não tem pelo menos 'rodadas_minimas_para_citar_numero' rodadas medidas (config/angulo_regras.json) -- o ângulo não muda, só some o número. Sétima rodada (25/09/2026): 'sem_site_sem_reputacao' e 'portal_sem_reputacao' cobrem nota/avaliações não confirmadas OU 0 avaliações. Oitava rodada (25/09/2026, go-live): entraram 'rede_social'/'rede_social_sem_reputacao' ({rede} por 'nomes_rede') e 'construtor'/'construtor_sem_reputacao' ({constructor} por 'nomes_construtor'); 'superficie_google' passou a reusar os modelos de 'sem_site'. Nona rodada (25/09/2026, especificação final do MVP, diretor + especialista de copy): apresentação nova (config/remetente_apresentacao.json); textos finais de TODOS os modelos revisados por inteiro (poucas_avaliacoes passa a terminar pedindo reseñas em vez de oferecer 'contar o que fazem'; sem_site/portal/rede_social/construtor com pergunta final diferente por ângulo); 'construtor' troca {dominio} (host cru) por {constructor} -- nome do construtor pelo domínio, em 'nomes_construtor' (wordpress.com, wixsite.com, sites.google.com, canva.site -- desconhecido usa o próprio domínio, igual 'nomes_portal'/'nomes_rede'). O canal (WhatsApp/e-mail/'para depois') e a coluna única 'WhatsApp' (decisão do mesmo dia) não mudam texto de modelo nenhum -- são regra de planilha_envio.py. Décima rodada (27/09/2026, as 4 mudanças conceituais -- QUALIFICADOR não inventa fatos; COMERCIAL transforma fato em consequência plausível; copy vende a relevância da conversa antes do serviço; teste A/B da abertura): cada modelo virou TRÊS BLOCOS -- 'fato' (observado), 'consequencia' (implicação plausível em linguagem condicional; null quando o ângulo não tem) e 'cta' (microdecisão, termina em '?'). A mensagem é montada por angulo_mensagem.compor_mensagem: saudacao + abertura da variante (config/remetente_apresentacao.json) + fato + consequencia + cta. O fato começa em minúscula -- depois de uma abertura que termina em ':' fica assim; senão a primeira letra sobe. A estrutura é conferida na carga (angulo_mensagem.carregar_mensagens_angulo) pelo classificador ferramentas/afirmacao.py: fato e cta sem afirmação de resultado; consequencia obrigatoriamente IMPLICACAO_PLAUSIVEL. Saiu de poucas_avaliacoes a história causal não verificada ('el paciente sale contento, pero nadie le pide que lo cuente') e a citação de categoria/cidade/número do concorrente (o concorrente 10x continua sendo a EVIDÊNCIA que escolhe o ângulo, em angulo_regras.json). 'Vi la suya' virou 'vi su ficha de Google' (a abertura B não fala mais da ficha). Textos da especificação do diretor; os que ela não trazia (1-4 avaliações, _singular, _sem_reputacao, construtor) redigidos pelo especialista na mesma estrutura.",
+  "saudacao": "Hola, buenas.",
+  "contato": {
+    "fato": "entré en su web desde el móvil y el teléfono aparece, pero no se puede pulsar para llamar; hay que copiarlo a mano.",
+    "consequencia": "Es un paso pequeño, pero añade una fricción justo cuando alguien quiere contactar.",
+    "cta": "Le hice una captura de cómo se ve, ¿se la envío?"
+  },
+  "poucas_avaliacoes_5_30": {
+    "fato": "vi su ficha de Google, un {nota} de media, pero con solo {n} reseñas.",
+    "consequencia": "Cuando alguien compara varias consultas en Google, puede encontrarse con otras que tienen muchas más reseñas.",
+    "cta": "¿Suelen pedir a los pacientes que les dejen una reseña?"
+  },
+  "poucas_avaliacoes_5_30_singular": {
+    "fato": "vi su ficha de Google, un {nota} de media, pero con solo {n} reseñas.",
+    "consequencia": "Cuando alguien compara varias consultas en Google, puede encontrarse con otra que tiene muchas más reseñas.",
+    "cta": "¿Suelen pedir a los pacientes que les dejen una reseña?"
+  },
+  "poucas_avaliacoes_1_4": {
+    "fato": "vi su ficha de Google, que todavía tiene solo {n} {reseñas_palavra}.",
+    "consequencia": "Cuando alguien compara varias consultas en Google, puede encontrarse con otras que tienen muchas más reseñas.",
+    "cta": "¿Suelen pedir a los pacientes que les dejen una reseña?"
+  },
+  "poucas_avaliacoes_1_4_singular": {
+    "fato": "vi su ficha de Google, que todavía tiene solo {n} {reseñas_palavra}.",
+    "consequencia": "Cuando alguien compara varias consultas en Google, puede encontrarse con otra que tiene muchas más reseñas.",
+    "cta": "¿Suelen pedir a los pacientes que les dejen una reseña?"
+  },
+  "lentidao": {
+    "fato": "abrí su web desde el móvil y estuve unos {s} segundos esperando a que apareciera el contenido.",
+    "consequencia": "Para alguien que entra desde el móvil para ver los servicios o cómo pedir cita, esa espera puede resultar una fricción.",
+    "cta": "Si quiere, le grabo un vídeo corto para que vea cómo carga, ¿se lo envío?"
+  },
+  "lentidao_sem_numero": {
+    "fato": "abrí su web desde el móvil y estuve bastante rato esperando a que apareciera el contenido.",
+    "consequencia": "Para alguien que entra desde el móvil para ver los servicios o cómo pedir cita, esa espera puede resultar una fricción.",
+    "cta": "Si quiere, le grabo un vídeo corto para que vea cómo carga, ¿se lo envío?"
+  },
+  "sem_site": {
+    "fato": "vi su ficha de Google, un {nota} con {n} reseñas, enhorabuena, pero me llamó la atención que no tenga una web propia.",
+    "consequencia": "Si alguien quiere ampliar información después de encontrarles en Google, hoy tiene que hacerlo por otros canales.",
+    "cta": "¿Hoy los pacientes les llegan más por Google o por recomendación?"
+  },
+  "sem_site_sem_reputacao": {
+    "fato": "vi su ficha de Google y me llamó la atención que no tenga una web propia.",
+    "consequencia": "Si alguien quiere ampliar información después de encontrarles en Google, hoy tiene que hacerlo por otros canales.",
+    "cta": "¿Hoy los pacientes les llegan más por Google o por recomendación?"
+  },
+  "portal": {
+    "fato": "vi su ficha de Google, un {nota} con {n} reseñas, y el enlace lleva a {portal}, donde también aparecen otros profesionales.",
+    "consequencia": null,
+    "cta": "¿Les llegan muchos pacientes a través de {portal}, o más por otras vías?"
+  },
+  "portal_sem_reputacao": {
+    "fato": "vi su ficha de Google y el enlace lleva a {portal}, donde también aparecen otros profesionales.",
+    "consequencia": null,
+    "cta": "¿Les llegan muchos pacientes a través de {portal}, o más por otras vías?"
+  },
+  "rede_social": {
+    "fato": "vi su ficha de Google, un {nota} con {n} reseñas, y el enlace lleva a {rede}.",
+    "consequencia": "Para alguien que quiere saber qué tratan o cómo pedir cita, puede resultar menos directo que una web propia.",
+    "cta": "¿Les escriben muchos pacientes por {rede}?"
+  },
+  "rede_social_sem_reputacao": {
+    "fato": "vi su ficha de Google y el enlace lleva a {rede}.",
+    "consequencia": "Para alguien que quiere saber qué tratan o cómo pedir cita, puede resultar menos directo que una web propia.",
+    "cta": "¿Les escriben muchos pacientes por {rede}?"
+  },
+  "construtor": {
+    "fato": "vi su ficha de Google, un {nota} con {n} reseñas, y su web está en una dirección de {constructor}, sin dominio propio.",
+    "consequencia": "Para alguien que quiere volver a encontrarles, una dirección propia puede ser más fácil de recordar.",
+    "cta": "¿La montaron ustedes mismos?"
+  },
+  "construtor_sem_reputacao": {
+    "fato": "vi su ficha de Google y su web está en una dirección de {constructor}, sin dominio propio.",
+    "consequencia": "Para alguien que quiere volver a encontrarles, una dirección propia puede ser más fácil de recordar.",
+    "cta": "¿La montaron ustedes mismos?"
+  },
+  "nomes_portal": {
+    "doctoralia.es": "Doctoralia",
+    "doctoralia.com": "Doctoralia",
+    "topdoctors.es": "Top Doctors",
+    "topdoctors.com": "Top Doctors"
+  },
+  "nomes_rede": {
+    "instagram.com": "Instagram",
+    "facebook.com": "Facebook",
+    "tiktok.com": "TikTok"
+  },
+  "nomes_construtor": {
+    "wordpress.com": "WordPress",
+    "wixsite.com": "Wix",
+    "sites.google.com": "Google Sites",
+    "canva.site": "Canva"
+  }
+}
