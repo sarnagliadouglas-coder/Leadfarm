@@ -28,9 +28,11 @@ from typing import Optional
 from openpyxl import load_workbook
 
 try:
+    import env_loader
     import registro_abordagens
 except ModuleNotFoundError:  # pragma: no cover - bootstrap de sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import env_loader
     import registro_abordagens
 
 # Campo do dict de `registro_abordagens._linhas_enviadas` -> coluna do registro.
@@ -107,6 +109,7 @@ def main(argv: Optional[list] = None) -> int:
 
     planilha = args.planilha
     if planilha is None:
+        env_loader.carregar_env()  # COMERCIAL_PLANILHAS_DIR pode estar em comercial/.env
         diretorio = Path(os.environ.get(ENV_PLANILHAS_DIR) or Path(__file__).resolve().parent.parent / "_planilhas")
         planilha = planilha_mais_recente(diretorio)
         if planilha is None:

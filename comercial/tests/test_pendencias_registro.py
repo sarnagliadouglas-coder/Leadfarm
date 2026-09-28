@@ -96,3 +96,20 @@ def test_sem_argumento_usa_a_planilha_mais_recente_do_diretorio(tmp_path, monkey
     assert pr.planilha_mais_recente(tmp_path).name == "planilha_envio_20260927-134806.xlsx"
     monkeypatch.setenv(pr.ENV_PLANILHAS_DIR, str(tmp_path))
     assert pr.main(["--registro", str(tmp_path / "r.xlsx")]) == 1  # p2 sem registro
+
+
+def test_sem_argumento_le_o_diretorio_do_comercial_env(tmp_path, monkeypatch, capsys):
+    """COMERCIAL_PLANILHAS_DIR vindo só de comercial/.env (não do ambiente)
+    precisa valer -- é onde o diretor configura a pasta da planilha em uso."""
+    import env_loader
+
+    pasta = tmp_path / "Resultado"
+    pasta.mkdir()
+    _planilha(pasta / "planilha_envio_20260927-134806.xlsx", [_lead("p2")])
+    env = tmp_path / ".env"
+    env.write_text(f'{pr.ENV_PLANILHAS_DIR}="{pasta}"\n', encoding="utf-8")
+    monkeypatch.setattr(env_loader, "_ENV_PATH", env)
+    monkeypatch.setenv(pr.ENV_PLANILHAS_DIR, "x")  # registra o original para o undo
+    monkeypatch.delenv(pr.ENV_PLANILHAS_DIR)
+    assert pr.main(["--registro", str(tmp_path / "r.xlsx")]) == 1
+    assert str(pasta / "planilha_envio_20260927-134806.xlsx") in capsys.readouterr().out
