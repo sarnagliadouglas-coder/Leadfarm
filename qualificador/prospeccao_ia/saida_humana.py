@@ -33,7 +33,7 @@ import site_classificacao
 
 # --- Colunas do CSV, nesta ordem (Etapa D, passo D6) ---------------------------------------
 COLUNAS = (
-    "pista", "motivo", "nome", "cidade", "telefone", "email", "instagram", "site",
+    "pista", "motivo", "nome", "nicho", "cidade", "telefone", "email", "instagram", "site",
     "classe_site", "avaliacoes", "nota", "google_maps_url", "place_id",
 )
 
@@ -138,6 +138,7 @@ def _linha(pista, motivo, emp, classe_site):
         "pista": pista,
         "motivo": motivo,
         "nome": emp.get("nome") or "",
+        "nicho": emp.get("nicho") or "",
         "cidade": _cidade_para_exibicao(emp),
         "telefone": emp.get("telefone") or "",
         "email": emp.get("email") or "",

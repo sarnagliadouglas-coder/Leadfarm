@@ -1,6 +1,6 @@
 {
   "_anotado_em": "2026-09-24",
-  "_nota": "Regras de escolha do ângulo da primeira mensagem (MVP, mudança de rumo decidida pelo diretor em 24/09/2026 -- angulo_mensagem.py). Para nata e candidatos_triagem, nesta ordem: 'contato' (telefone_na_pagina == 'texto') -> 'poucas_avaliacoes' (nota/avaliações/concorrente, limiares abaixo) -> 'lentidao' (lcp_minimo_ms) -> 'sem_angulo'. Nunca fixo no código. 'poucas_avaliacoes' renomeado de 'reputacao' na sexta rodada de decisões do diretor (mesmo dia): nota mínima caiu de 4,5 para 4,0, multiplicador do concorrente subiu de 5x para 10x, e passou a exigir avaliacoes_minimo (1) -- faixa 1-30, com dois modelos de mensagem (1 a 4 avaliações não cita a nota; 5 a 30 cita).",
+  "_nota": "Regras de escolha do ângulo da primeira mensagem (MVP, mudança de rumo decidida pelo diretor em 24/09/2026 -- angulo_mensagem.py). Para nata e candidatos_triagem, nesta ordem: 'contato' (telefone_na_pagina == 'texto') -> 'poucas_avaliacoes' (nota/avaliações/concorrente, limiares abaixo) -> 'lentidao' (lcp_minimo_ms) -> 'sem_angulo'. Nunca fixo no código. 'poucas_avaliacoes' renomeado de 'reputacao' na sexta rodada de decisões do diretor (mesmo dia): nota mínima caiu de 4,5 para 4,0, multiplicador do concorrente subiu de 5x para 10x, e passou a exigir avaliacoes_minimo (1) -- faixa 1-30, com dois modelos de mensagem (1 a 4 avaliações não cita a nota; 5 a 30 cita). Rodada de 01/10/2026 (templates novos, diretor): 'lentidao_moderada' (LCP de lcp_minimo_ms até lentidao.lcp_minimo_ms, exclusive -- 5.000 a 9.999 ms; só com a mesma medição consistente de 'lentidao', porque o texto cita os segundos e não tem variante sem número); 'defeito_visivel' (ordem: logo antes da lentidão; DESLIGADO -- 'ativo': false e sem padrões até o diretor aprovar a lista; só tipo 'email' aciona o ângulo); 'sem_site' (nota e avaliações mínimas para o texto que elogia -- ASSUNÇÃO do especialista, a tarefa não trouxe limiares: abaixo disso usa 'sem_site_sem_reputacao'); 'nome_curto' (limites do {nombre}); 'setor_saude' (radicais de palavra -- o CSV humano da pista Direta não traz o nicho, decide pelo nome). Segunda rodada (01/10/2026, diretor): 'defeito_visivel' ATIVO e com prioridade total (antes de todos os ângulos); padrões de tipo 'email' acionam o ângulo; os de outros tipos só são detectados e registrados no Aviso (sem mensagem de defeito). Lista de padrões aprovada como proposta. Terceira rodada (01/10/2026, diretor): 'nome_curto' -- a cidade da busca no FIM do nome é removida (com ou sem separador); se o que sobra é vazio ou só 'palavras_genericas' (mais o nicho do lead), continua REVISAR NOME.",
   "poucas_avaliacoes": {
     "nota_minima": 4.0,
     "avaliacoes_minimo": 1,
@@ -10,5 +10,106 @@
   "lentidao": {
     "lcp_minimo_ms": 10000,
     "rodadas_minimas_para_citar_numero": 2
+  },
+  "lentidao_moderada": {
+    "lcp_minimo_ms": 5000
+  },
+  "defeito_visivel": {
+    "ativo": true,
+    "padroes": [
+      {
+        "tipo": "email",
+        "regex": "[\\w.+-]+@(?:website|example|domain|yourdomain|yoursite|dominio|tudominio|tuweb|mysite|sitename|company|email|test)\\.(?:com|es|org|net)\\b"
+      },
+      {
+        "tipo": "email",
+        "regex": "\\b(?:tuemail|tucorreo|youremail|nombre|name|usuario)@[\\w.-]+"
+      },
+      {
+        "tipo": "lorem_ipsum",
+        "regex": "lorem ipsum"
+      },
+      {
+        "tipo": "nome_empresa_modelo",
+        "regex": "your company|nombre de (?:tu|su) empresa|company name"
+      },
+      {
+        "tipo": "telefone_modelo",
+        "regex": "\\b(?:000[ -]?000[ -]?000|123[ -]?456[ -]?789)\\b"
+      },
+      {
+        "tipo": "endereco_modelo",
+        "regex": "calle ejemplo"
+      }
+    ]
+  },
+  "sem_site": {
+    "nota_minima": 4.0,
+    "avaliacoes_minimo": 5
+  },
+  "citar_nota": {
+    "_nota": "03/10/2026, diretor: portal, rede_social e construtor só citam a nota do Google quando ela é >= nota_minima; abaixo disso usam a variante sem reputação. Cobrar nota baixa de quem já a conhece, no 1º contato, soa como acusação.",
+    "nota_minima": 4.0
+  },
+  "nome_curto": {
+    "max_palavras": 6,
+    "max_caracteres": 45,
+    "palavras_genericas": [
+      "clínica",
+      "clinica",
+      "dental",
+      "dentista",
+      "dentistas",
+      "odontología",
+      "odontologia",
+      "odontólogo",
+      "centro",
+      "consulta",
+      "médico",
+      "medico",
+      "fisioterapia",
+      "psicología",
+      "psicologia",
+      "reformas",
+      "reforma",
+      "construcción",
+      "construcciones",
+      "constructora",
+      "empresa",
+      "estudio",
+      "arquitectura",
+      "agencia",
+      "inmobiliaria",
+      "servicios",
+      "instalaciones"
+    ]
+  },
+  "setor_saude": {
+    "radicais": [
+      "dent",
+      "odont",
+      "ortodon",
+      "periodon",
+      "endodon",
+      "implantolog",
+      "clinic",
+      "fisio",
+      "psicolog",
+      "medic",
+      "doctor",
+      "podolog",
+      "nutricion",
+      "oftalmolog",
+      "dermatolog",
+      "pediatr",
+      "ginecolog",
+      "logoped",
+      "osteopat",
+      "quiropr",
+      "terapeut",
+      "salud",
+      "sanitar",
+      "hospital"
+    ]
   }
 }

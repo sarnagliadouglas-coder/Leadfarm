@@ -549,6 +549,60 @@ def test_validar_mensagem_angulo_construtor_numero_do_dominio_passa():
     assert resultado.valido, resultado.motivos
 
 
+# --- nota baixa não é citada no 1º contato (diretor, 03/10/2026) ------------
+# Caso real: portal Top Doctors, nota 2,6 com 5 avaliações -- a mensagem
+# dizia "un 2,6 con 5 reseñas" a quem já conhece a própria nota.
+
+_REGRAS_CITAR_NOTA = {"citar_nota": {"nota_minima": 4.0}}
+
+
+@pytest.mark.parametrize("angulo,site", [
+    ("portal", "https://www.topdoctors.es/x"),
+    ("rede_social", "https://www.instagram.com/x"),
+    ("construtor", "https://x.wordpress.com"),
+])
+def test_nota_abaixo_do_minimo_nao_e_citada_e_usa_variante_sem_reputacao(angulo, site):
+    mensagem, entrada = am.montar_mensagem_direta(
+        angulo, {"nota": "2.6", "avaliacoes": "5", "site": site},
+        apresentacao="", mensagens=_MENSAGENS, regras=_REGRAS_CITAR_NOTA,
+    )
+    assert "2,6" not in mensagem
+    assert "reseñas" not in mensagem
+    assert "nota_google" not in entrada
+
+
+@pytest.mark.parametrize("angulo,site", [
+    ("portal", "https://www.topdoctors.es/x"),
+    ("rede_social", "https://www.instagram.com/x"),
+    ("construtor", "https://x.wordpress.com"),
+])
+def test_nota_no_limite_minimo_continua_sendo_citada(angulo, site):
+    """Controle negativo: nota igual ao mínimo (4,0) não é cortada -- o corte
+    é estritamente abaixo."""
+    mensagem, entrada = am.montar_mensagem_direta(
+        angulo, {"nota": "4.0", "avaliacoes": "8", "site": site},
+        apresentacao="", mensagens=_MENSAGENS, regras=_REGRAS_CITAR_NOTA,
+    )
+    assert "4,0" in mensagem
+    assert entrada["avaliacoes_google"] == 8
+
+
+def test_nota_baixa_sem_a_regra_na_config_mantem_o_comportamento_anterior():
+    """Sem `citar_nota` em `regras`, nada muda (mesmo padrão do critério do
+    `sem_site`, que também só age quando a chave existe)."""
+    mensagem, _ = am.montar_mensagem_direta(
+        "portal", {"nota": "2.6", "avaliacoes": "5", "site": "https://www.topdoctors.es/x"},
+        apresentacao="", mensagens=_MENSAGENS, regras={},
+    )
+    assert "2,6" in mensagem
+
+
+def test_config_real_tem_citar_nota_com_minimo_4():
+    """A config de verdade (não a fixture) carrega a regra."""
+    regras = am.carregar_regras_angulo()
+    assert regras["citar_nota"]["nota_minima"] == 4.0
+
+
 # --- verificação (reuso de validador_mensagem.py) ---------------------------
 
 

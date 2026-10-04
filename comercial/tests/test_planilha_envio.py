@@ -23,6 +23,7 @@ from planilha_envio import (
     COLUNAS_GERAL,
     COLUNAS_NATA,
     LIMITE_CELULA_XLSX,
+    STATUS_REVISAR,
     STATUS_SEM_MENSAGEM,
     LinkInconsistenteError,
     PlaceIdAusenteError,
@@ -1204,3 +1205,59 @@ def test_main_sem_saida_dir_passa_none_para_gerar_planilha(monkeypatch):
 def test_colunas_geral_e_nata_nao_tem_mais_variante():
     assert "Variante" not in COLUNAS_GERAL
     assert "Variante" not in COLUNAS_NATA
+
+
+# --- novos templates (01/10/2026): linha que pede revisão do operador ----------
+
+
+def _kwargs_reais(diretorio_capturas):
+    """Copy e regras REAIS de `config/` -- os textos novos é que se provam."""
+    kw = _kwargs_comuns(diretorio_capturas)
+    kw.update(
+        apresentacao=am.carregar_apresentacao(), mensagens_angulo=am.carregar_mensagens_angulo(),
+        config_validacao=pe.carregar_config_validacao(),
+    )
+    return kw
+
+
+def test_linha_nata_nome_inseguro_fica_sem_mensagem_e_marcada_para_revisar(tmp_path, monkeypatch):
+    monkeypatch.setattr(am, "carregar_cidade_busca", lambda *a, **k: "Alicante")
+    lead = _lead_nata(nome="Clínica Dental Ficticia 🦷 Su Sonrisa", nicho="Clínica dental", lcp_ms=12000,
+                      psi_estado="CONFIRMADO_PRESENTE", rodadas=2)
+    linha = montar_linhas_nata(
+        [lead], [], [], regras_angulo=am.carregar_regras_angulo(), **_kwargs_reais(tmp_path),
+    )[0]
+    assert linha["Ângulo"] == "lentidao"
+    assert linha["mensagem"] == ""
+    assert linha["Status"] == STATUS_REVISAR
+    assert "REVISAR NOME" in linha["Aviso"]
+    assert "Benal" not in linha["WhatsApp"]  # sem mensagem no link
+
+
+def test_linha_nata_nome_limpo_sai_com_mensagem_nova(tmp_path, monkeypatch):
+    monkeypatch.setattr(am, "carregar_cidade_busca", lambda *a, **k: "Alicante")
+    lead = _lead_nata(nome="Dental Brisa - Clínica Dental en Alicante", nicho="Clínica dental", lcp_ms=12000,
+                      psi_estado="CONFIRMADO_PRESENTE", rodadas=2)
+    linha = montar_linhas_nata(
+        [lead], [], [], regras_angulo=am.carregar_regras_angulo(), **_kwargs_reais(tmp_path),
+    )[0]
+    assert "Abrí la web de Dental Brisa desde el móvil" in linha["mensagem"]
+    assert linha["Status"] == ""
+    assert "REVISAR" not in linha["Aviso"]
+
+
+def test_linha_geral_sem_site_fora_da_saude_fica_sem_mensagem_e_marcada(tmp_path):
+    linha = montar_linhas_geral(
+        [_linha_csv(nome="Constructora Sol")], regras_angulo=am.carregar_regras_angulo(), **_kwargs_reais(tmp_path),
+    )[0]
+    assert linha["Ângulo"] == "sem_site"
+    assert linha["Mensagem sugerida"] == ""
+    assert "REVISAR SETOR" in linha["Aviso"]
+
+
+def test_linha_geral_sem_site_saude_sai_com_mensagem_nova(tmp_path):
+    linha = montar_linhas_geral(
+        [_linha_csv(nome="Clínica dental Sol")], regras_angulo=am.carregar_regras_angulo(), **_kwargs_reais(tmp_path),
+    )[0]
+    assert "se nota que sus pacientes están contentos" in linha["Mensagem sugerida"]
+    assert "REVISAR" not in linha["Aviso"]

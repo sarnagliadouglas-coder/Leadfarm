@@ -57,11 +57,23 @@ variante nem distribuidor: a antiga abertura A/B testava sequência de
 apresentação, não o objetivo comercial da mensagem, e as duas já tinham o
 MESMO texto desde a Fase 5 (sem especialização de setor nem menção a Google
 Business Profile).
+
+Novos modelos e ângulos (decisão do diretor, 01/10/2026): `lentidao` e
+`sem_site` trocam de texto; entram `lentidao_moderada` (LCP de 5.000 a 9.999
+ms) e `defeito_visivel` (texto de modelo esquecido no site, desligado até o
+diretor aprovar a lista de padrões -- `regras["defeito_visivel"]`). Esses
+modelos trazem a própria `apresentacao`, usam `{nombre}` (nome curto do
+negócio) e declaram em `excecoes_validacao` quais checagens do validador
+dispensam -- só eles. Quando o nome não limpa com segurança, ou o setor não é
+saúde num modelo que fala de "paciente" (`exige_setor_saude`), o lead não
+recebe mensagem pronta: `LinhaPedeRevisaoError` e o operador revisa.
 """
 
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
@@ -75,6 +87,7 @@ except ModuleNotFoundError:  # pragma: no cover - bootstrap de sys.path
     import validador_mensagem
 
 import afirmacao
+from nome_comercial import nome_comercial_limpo
 
 _CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 CAMINHO_REGRAS_PADRAO = _CONFIG_DIR / "angulo_regras.json"
@@ -87,7 +100,7 @@ MODELOS = (
     "contato",
     "poucas_avaliacoes_5_30", "poucas_avaliacoes_5_30_singular",
     "poucas_avaliacoes_1_4", "poucas_avaliacoes_1_4_singular",
-    "lentidao", "lentidao_sem_numero",
+    "lentidao", "lentidao_sem_numero", "lentidao_moderada", "defeito_visivel",
     "sem_site", "sem_site_sem_reputacao",
     "portal", "portal_sem_reputacao",
     "rede_social", "rede_social_sem_reputacao",
@@ -99,14 +112,14 @@ _CHAVES_MENSAGENS_OBRIGATORIAS = (
     "contato",
     "poucas_avaliacoes_5_30", "poucas_avaliacoes_5_30_singular",
     "poucas_avaliacoes_1_4", "poucas_avaliacoes_1_4_singular",
-    "lentidao", "lentidao_sem_numero",
+    "lentidao", "lentidao_sem_numero", "lentidao_moderada", "defeito_visivel",
     "sem_site", "sem_site_sem_reputacao",
     "portal", "portal_sem_reputacao", "nomes_portal",
     "rede_social", "rede_social_sem_reputacao", "nomes_rede",
     "construtor", "construtor_sem_reputacao", "nomes_construtor",
 )
 
-ANGULOS_NATA = ("contato", "poucas_avaliacoes", "lentidao")
+ANGULOS_NATA = ("contato", "poucas_avaliacoes", "defeito_visivel", "lentidao", "lentidao_moderada")
 SEM_ANGULO = "sem_angulo"
 
 # --- tipo de CTA por ângulo (D12 Fase 5, decisão do diretor, 29/09/2026) ----
@@ -120,6 +133,8 @@ SEM_ANGULO = "sem_angulo"
 CTA_TIPO_POR_ANGULO = {
     "contato": "revision",
     "lentidao": "revision",
+    "lentidao_moderada": "revision",
+    "defeito_visivel": "revision",
     "poucas_avaliacoes": "diagnostico",
     "sem_site": "diagnostico",
     "portal": "diagnostico",
@@ -138,6 +153,14 @@ class ConfigMensagensAnguloInvalidaError(Exception):
 
 class ConfigCidadeBuscaInvalidaError(Exception):
     """`config/cidade_da_busca.json` ausente, ilegível ou incompleto."""
+
+
+class LinhaPedeRevisaoError(Exception):
+    """O lead tem ângulo, mas a mensagem não sai pronta para enviar: o
+    operador revisa antes (nome do negócio sem corte seguro; setor fora da
+    saúde num modelo que fala de "paciente"). A mensagem fica vazia -- nunca
+    um texto duvidoso na planilha. `str(e)` é o motivo, em português, para a
+    coluna `Aviso`."""
 
 
 class ConfigApresentacaoInvalidaError(Exception):
@@ -191,7 +214,10 @@ def carregar_mensagens_angulo(caminho: Path = CAMINHO_MENSAGENS_PADRAO, config_a
 def problemas_de_estrutura(mensagens: dict, config_afirmacao: Optional[dict]) -> list:
     """Confere cada modelo de `MODELOS` (decisão do diretor, 27/09/2026):
     `fato` e `cta` strings não vazias, `cta` termina em "?", `consequencia`
-    string ou `null`. Com `config_afirmacao`: `fato` e `cta` nunca afirmam
+    string ou `null` (um modelo pode dispensar, em
+    `excecoes_validacao`, o "?" do CTA -- `sem_pergunta_final` -- e os
+    marcadores de implicação da consequência -- `consequencia_sem_marcador`).
+    Com `config_afirmacao`: `fato` e `cta` nunca afirmam
     resultado; `consequencia`, quando existe, é IMPLICACAO_PLAUSIVEL (nem
     fato cru, nem resultado afirmado). Devolve a lista de problemas (vazia =
     ok) -- nunca aceita em silêncio."""
@@ -209,7 +235,8 @@ def problemas_de_estrutura(mensagens: dict, config_afirmacao: Optional[dict]) ->
             problemas.append(f"{chave}.consequencia: deve ser texto não vazio ou null")
             consequencia = None
         cta = modelo.get("cta")
-        if isinstance(cta, str) and not cta.strip().endswith("?"):
+        excecoes = modelo.get("excecoes_validacao") or {}
+        if isinstance(cta, str) and not excecoes.get("sem_pergunta_final") and not cta.strip().endswith("?"):
             problemas.append(f"{chave}.cta: não termina em '?'")
         if not config_afirmacao:
             continue
@@ -219,7 +246,12 @@ def problemas_de_estrutura(mensagens: dict, config_afirmacao: Optional[dict]) ->
                 problemas.append(f"{chave}.{bloco}: afirma resultado/causa não observado")
         if consequencia is not None:
             classe = afirmacao.classificar_texto(consequencia, config_afirmacao)
-            if classe != afirmacao.IMPLICACAO_PLAUSIVEL:
+            if excecoes.get("consequencia_sem_marcador"):
+                # texto aprovado sem os marcadores de implicação: continua
+                # proibido afirmar resultado/causa (RESULTADO_NAO_SUSTENTADO)
+                if classe == afirmacao.RESULTADO_NAO_SUSTENTADO:
+                    problemas.append(f"{chave}.consequencia: classificada como {classe}")
+            elif classe != afirmacao.IMPLICACAO_PLAUSIVEL:
                 problemas.append(f"{chave}.consequencia: classificada como {classe}, não como IMPLICACAO_PLAUSIVEL")
     return problemas
 
@@ -280,6 +312,14 @@ def _formatar_apresentacao(apresentacao: Optional[str]) -> str:
     return f" {texto}"
 
 
+class MensagemComposta(str):
+    """A mensagem pronta (é uma `str` comum) levando junto, em `.excecoes`, as
+    `excecoes_validacao` do modelo que a gerou -- `validar_mensagem_angulo`
+    as lê daqui, sem que quem chama precise saber qual modelo foi usado."""
+
+    excecoes: dict = {}
+
+
 def compor_mensagem(
     modelo: dict, saudacao: str, apresentacao: Optional[str], *, incluir_consequencia: bool = True, **valores,
 ) -> str:
@@ -287,8 +327,9 @@ def compor_mensagem(
     minúscula no modelo: segue assim depois de abertura terminada em ":",
     sobe a primeira letra nos demais casos. `incluir_consequencia=False`
     tira só a consequência -- fato e CTA ficam intactos (critério de
-    aceitação da mudança 2)."""
-    abertura = _formatar_apresentacao(apresentacao)
+    aceitação da mudança 2). Um modelo com chave `apresentacao` usa a dele no
+    lugar da global (01/10/2026: "Soy Douglas, hago webs aquí en Alicante.")."""
+    abertura = _formatar_apresentacao(modelo.get("apresentacao", apresentacao))
     partes = [modelo["fato"].format(**valores)]
     if incluir_consequencia and modelo.get("consequencia"):
         partes.append(modelo["consequencia"].format(**valores))
@@ -296,7 +337,9 @@ def compor_mensagem(
     corpo = " ".join(partes)
     if not abertura.endswith(":"):
         corpo = corpo[:1].upper() + corpo[1:]
-    return f"{saudacao}{abertura} {corpo}"
+    mensagem = MensagemComposta(f"{saudacao}{abertura} {corpo}")
+    mensagem.excecoes = dict(modelo.get("excecoes_validacao") or {})
+    return mensagem
 
 
 def _formatar_nota(nota) -> str:
@@ -432,6 +475,170 @@ def _medicao_consistente_para_citar_numero(lead, rodadas_minimas: int) -> bool:
     return isinstance(rodadas, (int, float)) and rodadas >= rodadas_minimas
 
 
+# --- ângulo "defeito_visivel" (desligado até o diretor aprovar os padrões) ----
+
+
+def _texto_do_site(lead) -> str:
+    campo = (lead.get("analise_tecnica_site") or {}).get("texto_site")
+    if isinstance(campo, dict):
+        return campo.get("texto") or ""
+    valor = getattr(campo, "valor_confirmado", None)
+    if isinstance(valor, dict):
+        return valor.get("texto") or ""
+    return valor if isinstance(valor, str) else ""
+
+
+def _texto_encontrado_defeito(lead, regras: dict) -> Optional[str]:
+    """Primeiro trecho de modelo esquecido achado no e-mail confirmado do
+    lead ou no texto do site (quando medido). `regras["defeito_visivel"]` =
+    `{"ativo": bool, "padroes": [{"tipo": "email", "regex": "..."}]}`.
+    Desligado (`ativo` falso/ausente) ou sem padrões: `None`. Só `tipo ==
+    "email"` aciona o ângulo -- o texto aprovado diz "el correo no les llega",
+    que só vale para e-mail; outros tipos esperam variação de texto aprovada
+    pelo diretor. O trecho vem do dado, nunca é escrito aqui."""
+    cfg = regras.get("defeito_visivel") or {}
+    if not cfg.get("ativo"):
+        return None
+    fontes = []
+    email = (lead.get("contato") or {}).get("email")
+    if email is not None and hasattr(email, "presente") and email.presente() and isinstance(email.valor_confirmado, str):
+        fontes.append(email.valor_confirmado)
+    texto_site = _texto_do_site(lead)
+    if texto_site:
+        fontes.append(texto_site)
+    for padrao in cfg.get("padroes", []):
+        if padrao.get("tipo") != "email":
+            continue
+        regex = re.compile(padrao["regex"], re.IGNORECASE)
+        for fonte in fontes:
+            achado = regex.search(fonte)
+            if achado:
+                return achado.group(0)
+    return None
+
+
+def defeitos_nao_email(lead, regras: dict) -> list:
+    """Trechos de modelo esquecido de tipo diferente de e-mail (lorem ipsum,
+    nome de empresa de modelo, ...), como `["tipo: 'trecho'"]`. Só detecta: o
+    texto aprovado do `defeito_visivel` é para e-mail, então estes viram nota
+    no `Aviso` da linha, nunca mensagem (diretor, 01/10/2026). Desligado ->
+    lista vazia."""
+    cfg = regras.get("defeito_visivel") or {}
+    if not cfg.get("ativo"):
+        return []
+    fontes = []
+    email = (lead.get("contato") or {}).get("email")
+    if email is not None and hasattr(email, "presente") and email.presente() and isinstance(email.valor_confirmado, str):
+        fontes.append(email.valor_confirmado)
+    texto_site = _texto_do_site(lead)
+    if texto_site:
+        fontes.append(texto_site)
+    achados = []
+    for padrao in cfg.get("padroes", []):
+        if padrao.get("tipo") == "email":
+            continue
+        regex = re.compile(padrao["regex"], re.IGNORECASE)
+        for fonte in fontes:
+            achado = regex.search(fonte)
+            if achado:
+                achados.append(f"{padrao['tipo']}: {achado.group(0)!r}")
+                break
+    return achados
+
+
+# --- nome curto e setor (revisão do operador) --------------------------------
+
+
+def _sem_acentos(texto: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", texto or "") if not unicodedata.combining(c))
+
+
+_CONECTORES_GENERICOS = {"en", "de", "del", "la", "el", "y", "e", "los", "las"}
+
+
+def _sem_cidade_no_fim(nome: str, cidade: str) -> str:
+    """Tira a cidade da busca do FIM do nome, com ou sem separador ("Alicante",
+    "- Alicante", "| Alicante", "en Alicante"), sem diferenciar maiúsculas
+    (decisão do diretor, 01/10/2026). Cidade no meio do nome não é tirada."""
+    if not cidade:
+        return nome
+    padrao = rf"(?:\s*[-–—|·,]\s*|\s+en\s+|\s+)?{re.escape(cidade.strip())}\s*$"
+    return re.sub(padrao, "", nome, flags=re.IGNORECASE).strip()
+
+
+def _so_generico(nome: str, nicho: Optional[str], genericas: list) -> bool:
+    palavras = set(_CONECTORES_GENERICOS)
+    for frase in [*genericas, nicho or ""]:
+        palavras.update(_sem_acentos(p).lower() for p in re.findall(r"\w+", frase))
+    return all(_sem_acentos(p).lower() in palavras for p in re.findall(r"\w+", nome))
+
+
+def nome_curto_seguro(nome: Optional[str], regras: dict, nicho: Optional[str] = None) -> str:
+    """`{nombre}` da mensagem: o nome do Maps cortado no subtítulo
+    (`nome_comercial_limpo`), SE o resultado for seguro -- senão
+    `LinhaPedeRevisaoError`. Inseguro: vazio; reticências (nome truncado pelo
+    Maps); separador sobrando; mais de `max_palavras`/`max_caracteres`;
+    símbolo/emoji; só palavras genéricas (`nome_curto.palavras_genericas`,
+    mais o nicho do lead) depois de tirar a cidade do fim; ou a cidade da
+    busca no MEIO do nome. A cidade no fim do nome é removida, não recusada
+    (diretor, 01/10/2026). Limites em `regras["nome_curto"]`."""
+    cfg = regras.get("nome_curto") or {}
+    max_palavras = cfg.get("max_palavras", 6)
+    max_caracteres = cfg.get("max_caracteres", 45)
+    limpo = (nome_comercial_limpo(nome) or "").strip()
+    try:
+        cidade = carregar_cidade_busca()
+    except ConfigCidadeBuscaInvalidaError:
+        cidade = ""
+    limpo = _sem_cidade_no_fim(limpo, cidade)
+    motivos = []
+    if not limpo:
+        motivos.append("nome vazio")
+    elif _so_generico(limpo, nicho, cfg.get("palavras_genericas", [])):
+        motivos.append("só palavras genéricas, sem o nome próprio do negócio")
+    else:
+        if "…" in limpo or "..." in limpo:
+            motivos.append("nome truncado pelo Maps")
+        if re.search(r"[|·–—/]|\s-\s", limpo):
+            motivos.append("separador sobrando no nome")
+        if len(limpo.split()) > max_palavras or len(limpo) > max_caracteres:
+            motivos.append("nome longo demais (palavras-chave do Maps)")
+        if any(unicodedata.category(c) in ("So", "Sk", "Cs", "Co") for c in limpo):
+            motivos.append("símbolo/emoji no nome")
+        if cidade and re.search(rf"\b{re.escape(_sem_acentos(cidade).lower())}\b", _sem_acentos(limpo).lower()):
+            motivos.append(f"cidade da busca ({cidade}) no nome")
+    if motivos:
+        raise LinhaPedeRevisaoError(
+            f"REVISAR NOME antes de enviar: {nome!r} não limpa com segurança ({'; '.join(motivos)})"
+        )
+    return limpo
+
+
+def setor_e_saude(nicho: Optional[str], nome: Optional[str], regras: dict) -> bool:
+    """`True` quando alguma palavra de `nicho` ou `nome` começa por um radical
+    de `regras["setor_saude"]["radicais"]` (sem acento/maiúscula; ex.:
+    "dent" casa "Dentista"/"Dental", não "residencia"). Sem a chave na
+    config: levanta `ValueError` -- nunca assume saúde em silêncio. A pista
+    Direta (CSV humano) não traz o nicho, então decide só pelo `nome`."""
+    radicais = (regras.get("setor_saude") or {}).get("radicais")
+    if not radicais:
+        raise ValueError("regras sem 'setor_saude.radicais' -- o modelo exige setor de saúde")
+    palavras = re.findall(r"\w+", _sem_acentos(f"{nicho or ''} {nome or ''}").lower())
+    return any(p.startswith(_sem_acentos(r).lower()) for p in palavras for r in radicais)
+
+
+def _conferir_setor(modelo: dict, nicho: Optional[str], nome: Optional[str], regras: dict) -> None:
+    if modelo.get("exige_setor_saude") and not setor_e_saude(nicho, nome, regras):
+        raise LinhaPedeRevisaoError(
+            f"REVISAR SETOR antes de enviar: o texto fala de pacientes e o negócio não aparece como saúde "
+            f"(nicho={nicho or 'não informado'!r}, nome={nome!r})"
+        )
+
+
+def _usa_nombre(modelo: dict) -> bool:
+    return any("{nombre}" in (modelo.get(b) or "") for b in ("fato", "consequencia", "cta"))
+
+
 # --- escolha do ângulo (nata + candidatos_triagem) --------------------------
 
 
@@ -440,6 +647,10 @@ def escolher_angulo_nata(lead, leads_do_lote: list, regras: dict) -> str:
     concorrente do ângulo `poucas_avaliacoes` (nata + candidatos_triagem +
     descartados) -- inclui o próprio `lead`, que é excluído por `place_id`
     dentro de `_concorrentes_qualificados`."""
+    # defeito_visivel: prioridade total, antes de todos (diretor, 01/10/2026)
+    if _texto_encontrado_defeito(lead, regras) is not None:
+        return "defeito_visivel"
+
     if _telefone_na_pagina_e_texto(lead):
         return "contato"
 
@@ -454,6 +665,15 @@ def escolher_angulo_nata(lead, leads_do_lote: list, regras: dict) -> str:
     lcp_ms = _lcp_ms_confirmado(lead)
     if lcp_ms is not None and lcp_ms >= regras["lentidao"]["lcp_minimo_ms"]:
         return "lentidao"
+
+    moderada = regras.get("lentidao_moderada")
+    if (
+        moderada and lcp_ms is not None and lcp_ms >= moderada["lcp_minimo_ms"]
+        # o texto aprovado cita os segundos e não tem variante sem número:
+        # só sai com medição consistente (mesma regra de `lentidao`)
+        and _medicao_consistente_para_citar_numero(lead, regras["lentidao"]["rodadas_minimas_para_citar_numero"])
+    ):
+        return "lentidao_moderada"
 
     return SEM_ANGULO
 
@@ -505,11 +725,24 @@ def montar_mensagem_nata(
     próprio lead e a consequência plausível ("puede encontrarse con otras
     que tienen muchas más reseñas")."""
     saudacao = mensagens["saudacao"]
+    identidade = lead.get("identidade") or {}
 
     def compor(chave, **valores):
+        modelo = mensagens[chave]
+        _conferir_setor(modelo, identidade.get("nicho"), identidade.get("nome"), regras)
+        if _usa_nombre(modelo):
+            valores["nombre"] = nome_curto_seguro(identidade.get("nome"), regras, identidade.get("nicho"))
         return compor_mensagem(
-            mensagens[chave], saudacao, apresentacao, incluir_consequencia=incluir_consequencia, **valores,
+            modelo, saudacao, apresentacao, incluir_consequencia=incluir_consequencia, **valores,
         )
+
+    if angulo == "defeito_visivel":
+        encontrado = _texto_encontrado_defeito(lead, regras)
+        if encontrado is None:
+            raise ValueError("ângulo 'defeito_visivel' sem texto de modelo encontrado")
+        cliente_paciente = "paciente" if setor_e_saude(identidade.get("nicho"), identidade.get("nome"), regras) else "cliente"
+        mensagem = compor("defeito_visivel", texto_encontrado=encontrado, cliente_paciente=cliente_paciente)
+        return mensagem, {"texto_encontrado": encontrado, "nombre": identidade.get("nome") or ""}
 
     if angulo == "contato":
         return compor("contato"), {}
@@ -540,8 +773,17 @@ def montar_mensagem_nata(
         rodadas_minimas = regras["lentidao"]["rodadas_minimas_para_citar_numero"]
         if _medicao_consistente_para_citar_numero(lead, rodadas_minimas):
             segundos = round(lcp_ms / 1000)
-            return compor("lentidao", s=segundos), {"segundos": segundos}
+            mensagem = compor("lentidao", s=segundos, segundos=segundos)
+            return mensagem, {"segundos": segundos, "nombre": identidade.get("nome") or ""}
         return compor("lentidao_sem_numero"), {}
+
+    if angulo == "lentidao_moderada":
+        lcp_ms = _lcp_ms_confirmado(lead)
+        if lcp_ms is None:
+            raise ValueError("ângulo 'lentidao_moderada' sem LCP confirmado")
+        segundos = round(lcp_ms / 1000)
+        mensagem = compor("lentidao_moderada", segundos=segundos)
+        return mensagem, {"segundos": segundos, "nombre": identidade.get("nome") or ""}
 
     raise ValueError(f"ângulo sem modelo de mensagem: {angulo!r}")
 
@@ -560,6 +802,7 @@ def _nota_e_avaliacoes_csv(linha_csv: dict) -> tuple:
 
 def montar_mensagem_direta(
     angulo: str, linha_csv: dict, *, apresentacao: str, mensagens: dict, incluir_consequencia: bool = True,
+    regras: Optional[dict] = None,
 ) -> tuple:
     """Devolve `(mensagem, entrada_derivada)` para `sem_site`/`portal`/
     `rede_social`/`construtor`. `apresentacao` é o texto único da
@@ -583,6 +826,16 @@ def montar_mensagem_direta(
     saudacao = mensagens["saudacao"]
     nota, avaliacoes = _nota_e_avaliacoes_csv(linha_csv)
     sem_reputacao = nota is None or avaliacoes is None or avaliacoes == 0
+    regras = regras or {}
+    elogio = regras.get("sem_site")
+    if angulo == "sem_site" and elogio and not sem_reputacao:
+        # o texto novo diz "se nota que sus pacientes están contentos": só com
+        # nota e quantidade de avaliações que sustentem o elogio
+        sem_reputacao = nota < elogio["nota_minima"] or avaliacoes < elogio["avaliacoes_minimo"]
+    citar_nota = regras.get("citar_nota")
+    if angulo in ("portal", "rede_social", "construtor") and citar_nota and not sem_reputacao:
+        # nota baixa não é citada no 1º contato (diretor, 03/10/2026)
+        sem_reputacao = nota < citar_nota["nota_minima"]
     chave = f"{angulo}_sem_reputacao" if sem_reputacao else angulo
 
     valores = {}
@@ -600,8 +853,14 @@ def montar_mensagem_direta(
         valores["constructor"] = constructor
         entrada_derivada["constructor"] = constructor
 
+    modelo = mensagens[chave]
+    _conferir_setor(modelo, linha_csv.get("nicho"), linha_csv.get("nome"), regras)
+    if _usa_nombre(modelo):
+        valores["nombre"] = entrada_derivada["nombre"] = nome_curto_seguro(
+            linha_csv.get("nome"), regras, linha_csv.get("nicho"),
+        )
     mensagem = compor_mensagem(
-        mensagens[chave], saudacao, apresentacao, incluir_consequencia=incluir_consequencia, **valores,
+        modelo, saudacao, apresentacao, incluir_consequencia=incluir_consequencia, **valores,
     )
     return mensagem, entrada_derivada
 
@@ -630,11 +889,12 @@ def validar_mensagem_angulo(
     precisa existir em `entrada_derivada` (nunca um número inventado).
     `palavras_genericas_nome` (ver `angulo_mensagem.palavras_genericas_nome`)
     evita o falso positivo da checagem de nome contra nicho/cidade."""
+    excecoes = getattr(mensagem, "excecoes", None)
     texto_resposta = json.dumps(
         {"estrategia": angulo, "canal_sugerido": "whatsapp", "mensagem_1": mensagem, "fato_usado": angulo},
         ensure_ascii=False,
     )
     return validador_mensagem.validar_mensagem(
         texto_resposta, entrada_derivada, config=config_validacao, nome_negocio=nome_negocio,
-        palavras_genericas_nome=palavras_genericas_nome,
+        palavras_genericas_nome=palavras_genericas_nome, excecoes=excecoes,
     )

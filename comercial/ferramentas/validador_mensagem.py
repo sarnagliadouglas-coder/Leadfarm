@@ -64,6 +64,13 @@ Treze checagens (1-12 do desenho aprovado em 23/09; 13 da mudança 2, 27/09/2026
     Checagem opcional pela ausência da chave `afirmacao`, mesmo princípio
     das checagens 8 e 9.
 
+Exceções por modelo (decisão do diretor, 01/10/2026, "Novos templates e
+ângulos"): `validar_mensagem(..., excecoes=...)` dispensa, SÓ para o modelo
+que as declara em `config/mensagens_angulo.json` (`excecoes_validacao`), a
+checagem 11 (`nome_negocio`), a 3 (`sem_pergunta_final`) e a contagem de
+certas palavras como número por extenso na 7 (`numeros_por_extenso`, ex.
+`["dos"]`). Sem `excecoes` -- ou para qualquer outro modelo -- nada muda.
+
 As listas de preço/informalidade/números por extenso/termos proibidos e o
 limite de palavras vêm de `config/validacao_mensagem.json` — nunca fixas em
 código (mesmo princípio da tabela de preços da Etapa E1).
@@ -268,6 +275,7 @@ def validar_mensagem(
     config: Optional[dict] = None,
     nome_negocio: Optional[str] = None,
     palavras_genericas_nome: Optional[list] = None,
+    excecoes: Optional[dict] = None,
 ) -> ResultadoValidacao:
     """Valida a resposta bruta do modelo (`texto_resposta`) contra as treze
     regras, cruzando números com `entrada` (a mesma entrada enviada para
@@ -285,7 +293,11 @@ def validar_mensagem(
     palavras, somadas às conectoras fixas ("en", "de", "del", "la", "el",
     "y"), tornam um trecho do nome "genérico" -- um candidato de nome cujas
     palavras são TODAS genéricas não conta como o nome do negócio vazando.
-    Nome com qualquer palavra própria (ex.: "Ficticio") continua rejeitado."""
+    Nome com qualquer palavra própria (ex.: "Ficticio") continua rejeitado.
+    `excecoes` (ver docstring do módulo): dict com `nome_negocio` (bool),
+    `sem_pergunta_final` (bool) e `numeros_por_extenso` (lista de palavras
+    que não contam como número) -- cada chave dispensa só a sua checagem."""
+    excecoes = excecoes or {}
     if config is None:
         config = carregar_config()
     motivos: list = []
@@ -313,7 +325,7 @@ def validar_mensagem(
             f"(máximo {config['max_palavras_mensagem_1']})"
         )
 
-    if not mensagem.strip().endswith("?"):
+    if not excecoes.get("sem_pergunta_final") and not mensagem.strip().endswith("?"):
         motivos.append("mensagem_1 não termina com '?'")
 
     if re.search(r"https?://|www\.", mensagem, re.IGNORECASE):
@@ -370,7 +382,7 @@ def validar_mensagem(
     elif texto_site_entrada:
         motivos.append("mensagem sem detalhe do site -- trecho_site é obrigatório quando texto_site está na entrada")
 
-    if nome_negocio:
+    if nome_negocio and not excecoes.get("nome_negocio"):
         candidatos_nome = {nome_negocio}
         nome_limpo = nome_comercial_limpo(nome_negocio)
         if nome_limpo:
@@ -389,7 +401,10 @@ def validar_mensagem(
         if achados_nome:
             motivos.append(f"mensagem_1 cita o nome do negócio: {achados_nome}")
 
-    numeros_mensagem = _numeros(mensagem) | _numeros_por_extenso(mensagem, config)
+    mensagem_para_extenso = mensagem
+    for palavra in excecoes.get("numeros_por_extenso") or ():
+        mensagem_para_extenso = re.sub(rf"\b{re.escape(palavra)}\b", " ", mensagem_para_extenso, flags=re.IGNORECASE)
+    numeros_mensagem = _numeros(mensagem) | _numeros_por_extenso(mensagem_para_extenso, config)
     numeros_entrada = _numeros(json.dumps(entrada, ensure_ascii=False))
     numeros_fora = numeros_mensagem - numeros_entrada
     if numeros_fora:

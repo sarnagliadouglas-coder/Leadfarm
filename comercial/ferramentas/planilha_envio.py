@@ -77,7 +77,7 @@ _RE_TIMESTAMP = re.compile(r"(\d{8}-\d{6})")
 _RE_PROFISSIONAL = re.compile(r"^\s*(?:dr\.?|dra\.?|doctor|doctora)\b", re.IGNORECASE)
 
 COLUNAS_CSV_HUMANO = (
-    "pista", "motivo", "nome", "cidade", "telefone", "email", "instagram", "site",
+    "pista", "motivo", "nome", "nicho", "cidade", "telefone", "email", "instagram", "site",
     "classe_site", "avaliacoes", "nota", "google_maps_url", "place_id",
 )
 
@@ -122,6 +122,9 @@ COLUNAS_NATA = (
 ) + COLUNAS_DIRETOR + ("Aviso", "Contexto para IA", "place_id")
 
 STATUS_SEM_MENSAGEM = "sem mensagem gerada"
+# Lead com ângulo cuja mensagem não sai pronta (nome sem corte seguro, setor
+# fora da saúde): o operador revisa antes -- `Aviso` traz o motivo.
+STATUS_REVISAR = "revisar antes de enviar"
 
 # Limite real do Excel por célula (.xlsx) -- acima disso o arquivo corrompe a
 # célula. "Contexto para IA" é a única coluna que pode chegar perto (o texto
@@ -413,6 +416,7 @@ def montar_contexto_ia_geral(linha: dict) -> str:
 
 def _linha_geral(
     lead: dict, *, apresentacao, config_validacao, assuntos_email, mensagens_angulo, diretorio_capturas,
+    regras_angulo: Optional[dict] = None,
 ) -> dict:
     telefone = lead.get("telefone")
     email = lead.get("email")
@@ -429,14 +433,20 @@ def _linha_geral(
     angulo = angulo_mensagem.escolher_angulo_direta(lead)
     linha["Ângulo"] = angulo
     if angulo != angulo_mensagem.SEM_ANGULO:
-        mensagem, entrada_derivada = angulo_mensagem.montar_mensagem_direta(
-            angulo, lead, apresentacao=apresentacao, mensagens=mensagens_angulo,
-        )
-        resultado_validacao = angulo_mensagem.validar_mensagem_angulo(
+        try:
+            mensagem, entrada_derivada = angulo_mensagem.montar_mensagem_direta(
+                angulo, lead, apresentacao=apresentacao, mensagens=mensagens_angulo, regras=regras_angulo,
+            )
+        except angulo_mensagem.LinhaPedeRevisaoError as e:
+            mensagem, entrada_derivada = None, None
+            linha["Aviso"] = str(e)
+        resultado_validacao = None if mensagem is None else angulo_mensagem.validar_mensagem_angulo(
             mensagem, angulo, entrada_derivada, nome_negocio=lead.get("nome"), config_validacao=config_validacao,
             palavras_genericas_nome=angulo_mensagem.palavras_genericas_nome(angulo_mensagem.carregar_cidade_busca()),
         )
-        if not resultado_validacao.valido:
+        if resultado_validacao is None:
+            pass
+        elif not resultado_validacao.valido:
             linha["Aviso"] = "; ".join(resultado_validacao.motivos)
         else:
             linha["Mensagem sugerida"] = mensagem
@@ -556,22 +566,30 @@ def _linha_nata(
 
     angulo = angulo_mensagem.escolher_angulo_nata(lead, leads_do_lote, regras_angulo)
     linha["Ângulo"] = angulo
+    nao_email = angulo_mensagem.defeitos_nao_email(lead, regras_angulo)
     mensagem_final = None
     if angulo == angulo_mensagem.SEM_ANGULO:
         linha["Status"] = STATUS_SEM_MENSAGEM
     else:
-        mensagem, entrada_derivada = angulo_mensagem.montar_mensagem_nata(
-            angulo, lead, leads_do_lote, apresentacao=apresentacao, regras=regras_angulo,
-            mensagens=mensagens_angulo,
-        )
-        resultado_validacao = angulo_mensagem.validar_mensagem_angulo(
+        try:
+            mensagem, entrada_derivada = angulo_mensagem.montar_mensagem_nata(
+                angulo, lead, leads_do_lote, apresentacao=apresentacao, regras=regras_angulo,
+                mensagens=mensagens_angulo,
+            )
+        except angulo_mensagem.LinhaPedeRevisaoError as e:
+            mensagem, entrada_derivada = None, None
+            linha["Aviso"] = str(e)
+            linha["Status"] = STATUS_REVISAR
+        resultado_validacao = None if mensagem is None else angulo_mensagem.validar_mensagem_angulo(
             mensagem, angulo, entrada_derivada, nome_negocio=lead["identidade"]["nome"],
             config_validacao=config_validacao,
             palavras_genericas_nome=angulo_mensagem.palavras_genericas_nome(
                 lead["identidade"]["nicho"], angulo_mensagem.carregar_cidade_busca(),
             ),
         )
-        if not resultado_validacao.valido:
+        if resultado_validacao is None:
+            pass
+        elif not resultado_validacao.valido:
             linha["Aviso"] = "; ".join(resultado_validacao.motivos)
             linha["Status"] = STATUS_SEM_MENSAGEM
         else:
@@ -586,6 +604,10 @@ def _linha_nata(
         else whatsapp_utils.link_whatsapp(numero) if numero else ""
     )
 
+    if nao_email:
+        linha["Aviso"] = "; ".join(filter(None, [
+            linha["Aviso"], "texto de modelo no site (sem mensagem de defeito): " + "; ".join(nao_email),
+        ]))
     captura, aviso_captura = link_captura(lead["place_id"], lead["classe_site"], diretorio_capturas)
     linha["Captura"] = captura
     if aviso_captura:
@@ -863,7 +885,7 @@ def gerar_planilha(
         mensagens_angulo=mensagens_angulo, diretorio_capturas=diretorio_capturas,
     )
 
-    linhas_geral = montar_linhas_geral(leads_csv, **kwargs_comuns)
+    linhas_geral = montar_linhas_geral(leads_csv, regras_angulo=regras_angulo, **kwargs_comuns)
     linhas_nata = montar_linhas_nata(
         nata_incluida, candidatos_incluidos, lote.descartados, regras_angulo=regras_angulo,
         **kwargs_comuns,

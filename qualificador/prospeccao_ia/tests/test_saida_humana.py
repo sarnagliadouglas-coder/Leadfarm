@@ -40,6 +40,19 @@ def test_linha_usa_cidade_de_exibicao_no_csv():
     assert linhas[0]["cidade"] == "Madrid"
 
 
+def test_linha_traz_o_nicho_e_a_coluna_vem_logo_depois_do_nome():
+    q = _qualificado()
+    q["dados_empresa"]["nicho"] = "Clínica dental"
+    assert sh.montar_linhas([q], [])[0]["nicho"] == "Clínica dental"
+    assert sh.COLUNAS[sh.COLUNAS.index("nome") + 1] == "nicho"
+
+
+def test_nicho_ausente_vira_celula_vazia():
+    q = _qualificado()
+    q["dados_empresa"]["nicho"] = None
+    assert sh.montar_linhas([q], [])[0]["nicho"] == ""
+
+
 def test_qualificado_onda1_vira_direta_sem_site():
     linhas = sh.montar_linhas([_qualificado()], [])
     assert len(linhas) == 1

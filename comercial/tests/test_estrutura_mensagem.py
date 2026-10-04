@@ -28,7 +28,8 @@ _MENSAGENS_REAIS = am.carregar_mensagens_angulo()
 _APRESENTACAO_REAL = am.carregar_apresentacao()
 
 _VALORES = dict(nota="4,8", n=8, reseñas_palavra="reseñas", s=11, portal="Top Doctors", rede="Instagram",
-                constructor="WordPress")
+                constructor="WordPress", nombre="Clínica Sol", segundos=11, texto_encontrado="info@website.com",
+                cliente_paciente="paciente")
 _ENTRADA = {"nota_google": "4,8", "avaliacoes_google": 8, "segundos": 11}
 
 
@@ -202,7 +203,7 @@ def test_apresentacao_real_e_universal():
     setor nem menção a Google Business Profile (D12 Fases 1-3). Substitui os
     testes antigos de A/B (`carregar_aberturas`, variantes, segmento) --
     removidos com o mecanismo que testavam, não afrouxados."""
-    assert _APRESENTACAO_REAL == "Soy Douglas Fonseca, ayudo a negocios locales con su presencia online."
+    assert _APRESENTACAO_REAL == "Soy Douglas, hago webs aquí en Alicante."  # unificada em 03/10/2026 (diretor)
     for termo in ("salud", "consultas", "pacientes", "psicólog", "médic", "ficha de Google", "{segment_positioning}"):
         assert termo not in _APRESENTACAO_REAL
 
