@@ -397,9 +397,14 @@ def test_ponta_a_ponta_gerar_preencher_registrar_e_excluir_na_proxima_planilha(t
     saida_dir = tmp_path / "_planilhas"
 
     # 1) gera a planilha real
+    # consolidada_dir isolado em tmp_path -- sem isto, gerar_planilha cairia no
+    # COMERCIAL_PLANILHAS_DIR real (comercial/.env) e escreveria fixture de
+    # teste ("p-geral"/"p-nata") na planilha consolidada de verdade do diretor
+    # (defeito real, achado e limpo manualmente em 01/10/2026).
     resultado1 = pe.gerar_planilha(
         caminho_csv_humano=caminho_csv, saida_dir=saida_dir, caminho_registro=diretorio_registro / "registro_abordagens.xlsx",
         agora=datetime(2026, 9, 25, 9, 0, 0, tzinfo=timezone.utc), diretorio_capturas=tmp_path / "_capturas_inexistente",
+        consolidada_dir=tmp_path / "_consolidada_teste",
     )
     assert resultado1["excluidos_geral"] == 0
     assert resultado1["excluidos_nata"] == 0
@@ -427,6 +432,7 @@ def test_ponta_a_ponta_gerar_preencher_registrar_e_excluir_na_proxima_planilha(t
     resultado2 = pe.gerar_planilha(
         caminho_csv_humano=caminho_csv, saida_dir=saida_dir, caminho_registro=diretorio_registro / "registro_abordagens.xlsx",
         agora=datetime(2026, 9, 25, 9, 30, 0, tzinfo=timezone.utc), diretorio_capturas=tmp_path / "_capturas_inexistente",
+        consolidada_dir=tmp_path / "_consolidada_teste",
     )
     assert resultado2["excluidos_geral"] == 1
     assert resultado2["excluidos_nata"] == 1

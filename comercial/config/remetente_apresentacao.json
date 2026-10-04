@@ -1,16 +1,6 @@
 {
-  "_anotado_em": "2026-09-27",
-  "_nota": "'apresentacao' é a apresentação usada até 26/09/2026 -- continua lida pelos templates antigos da pista Direta (templates_direta.py, fora do fluxo) e é, por definição, o texto do CONTROLE (A) do teste de abertura. 'variantes_abertura' (decisão do diretor, 27/09/2026, mudança 4): A = serviço primeiro (controle), B = motivo do contato primeiro. O corpo da mensagem é o MESMO nas duas -- só a abertura muda. '{segment_positioning}' é resolvido por angulo_mensagem.carregar_aberturas a partir de 'segment_positioning' -- trocar o segmento é editar só essa chave, sem reescrever modelo nenhum. Abertura terminada em ':' faz o fato seguir em minúscula.",
+  "_anotado_em": "2026-09-29",
+  "_nota": "D12 Fase 5.1 (diretor, 29/09/2026): aposentadoria da estrutura A/B. Desde a Fase 5 as duas variantes de 'variantes_abertura' já tinham o MESMO texto (apresentação única, sem especialização de setor, sem menção a Google Business Profile) -- não havia mais experimento nenhum por trás da alternância, só o rótulo. Esta fase remove a chave 'variantes_abertura' e 'segment_positioning' (dependiam só do mecanismo A/B, sem outro uso) e a maquinaria de código correspondente (`angulo_mensagem.carregar_aberturas`/`DistribuidorVariante`, removidos; ver `angulo_mensagem.carregar_apresentacao`). 'apresentacao_atual' é a única fonte usada pelo fluxo atual (contato/poucas_avaliacoes/lentidao/sem_site/portal/rede_social/construtor). 'apresentacao' (abaixo) é o texto do CONTROLE histórico anterior à Fase 3 -- continua lido só por templates_direta.py (fora do fluxo) e não foi alterado nesta rodada nem em nenhuma das fases do D12. D12 Fase 5.2 (diretor, 29/09/2026): 'apresentacao_atual' trocada de 'Soy Douglas Fonseca, hago webs para negocios locales.' para 'Soy Douglas Fonseca, ayudo a negocios locales con su presencia online.' -- decisão de posicionamento (reduzir risco de rejeição prematura por leads que já têm site), texto único, sem A/B. Nada mais mudou nesta rodada.",
   "apresentacao": "Soy Douglas Fonseca, hago webs para consultas de salud y les ayudo con su ficha de Google.",
-  "segment_positioning": "profesionales",
-  "variantes_abertura": {
-    "A": {
-      "nome": "service_first",
-      "texto": "Soy Douglas Fonseca, hago webs para consultas de salud y les ayudo con su ficha de Google."
-    },
-    "B": {
-      "nome": "problem_first",
-      "texto": "Soy Douglas Fonseca, trabajo con webs para {segment_positioning}. Estuve revisando su presencia online y vi algo concreto que quería comentarle:"
-    }
-  }
+  "apresentacao_atual": "Soy Douglas Fonseca, ayudo a negocios locales con su presencia online."
 }

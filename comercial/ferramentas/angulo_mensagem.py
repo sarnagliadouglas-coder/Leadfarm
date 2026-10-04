@@ -45,16 +45,18 @@ avaliações confirmadas) nunca é escolhido — "não inventa fato" vale aqui c
 em qualquer outra parte do COMERCIAL; a regra cai para a próxima da lista.
 
 Estrutura da mensagem (decisão do diretor, 27/09/2026 — as 4 mudanças
-conceituais): SAUDAÇÃO + ABERTURA da variante (A = serviço primeiro,
-controle; B = motivo do contato primeiro) + FATO + CONSEQUÊNCIA PLAUSÍVEL +
-CTA. Cada modelo de `config/mensagens_angulo.json` guarda os três blocos
-separados (`fato`, `consequencia` — pode ser `null` —, `cta`), e a carga
-confere a estrutura com `afirmacao.py` (fato e CTA sem afirmação de
-resultado; consequência obrigatoriamente IMPLICACAO_PLAUSIVEL). A
-consequência pode ser retirada sem invalidar o fato
-(`compor_mensagem(..., incluir_consequencia=False)`). O corpo é o MESMO nas
-duas variantes — só a abertura muda (`carregar_aberturas`), e
-`DistribuidorVariante` alterna A/B dentro de cada ângulo e canal.
+conceituais; abertura A/B aposentada em 29/09/2026, D12 Fase 5.1): SAUDAÇÃO +
+APRESENTAÇÃO + FATO + CONSEQUÊNCIA PLAUSÍVEL + CTA. Cada modelo de
+`config/mensagens_angulo.json` guarda os três blocos separados (`fato`,
+`consequencia` — pode ser `null` —, `cta`), e a carga confere a estrutura com
+`afirmacao.py` (fato e CTA sem afirmação de resultado; consequência
+obrigatoriamente IMPLICACAO_PLAUSIVEL). A consequência pode ser retirada sem
+invalidar o fato (`compor_mensagem(..., incluir_consequencia=False)`). A
+apresentação é única (`carregar_apresentacao`) — não há mais alternância de
+variante nem distribuidor: a antiga abertura A/B testava sequência de
+apresentação, não o objetivo comercial da mensagem, e as duas já tinham o
+MESMO texto desde a Fase 5 (sem especialização de setor nem menção a Google
+Business Profile).
 """
 
 from __future__ import annotations
@@ -91,7 +93,6 @@ MODELOS = (
     "rede_social", "rede_social_sem_reputacao",
     "construtor", "construtor_sem_reputacao",
 )
-VARIANTES = ("A", "B")
 
 _CHAVES_MENSAGENS_OBRIGATORIAS = (
     "saudacao",
@@ -108,6 +109,24 @@ _CHAVES_MENSAGENS_OBRIGATORIAS = (
 ANGULOS_NATA = ("contato", "poucas_avaliacoes", "lentidao")
 SEM_ANGULO = "sem_angulo"
 
+# --- tipo de CTA por ângulo (D12 Fase 5, decisão do diretor, 29/09/2026) ----
+#
+# Não é um campo novo no contrato nem na planilha -- é só uma leitura
+# derivada do ângulo já registrado em "Ângulo"/`angulo` (registro_
+# abordagens.py). "revision" = oferece a Revisión breve (D12 Fase 4);
+# "diagnostico" e "confirmacion" são os mesmos tipos de CTA definidos na
+# Fase 3. `construtor` fica "confirmacion" -- NÃO recebe Revisión breve
+# neste rollout (sem captura automática, classe_site != "proprio").
+CTA_TIPO_POR_ANGULO = {
+    "contato": "revision",
+    "lentidao": "revision",
+    "poucas_avaliacoes": "diagnostico",
+    "sem_site": "diagnostico",
+    "portal": "diagnostico",
+    "rede_social": "diagnostico",
+    "construtor": "confirmacion",
+}
+
 
 class ConfigAnguloInvalidaError(Exception):
     """`config/angulo_regras.json` ausente, ilegível ou incompleto."""
@@ -121,9 +140,9 @@ class ConfigCidadeBuscaInvalidaError(Exception):
     """`config/cidade_da_busca.json` ausente, ilegível ou incompleto."""
 
 
-class ConfigAberturasInvalidaError(Exception):
-    """`config/remetente_apresentacao.json` sem `variantes_abertura` A e B
-    utilizáveis."""
+class ConfigApresentacaoInvalidaError(Exception):
+    """`config/remetente_apresentacao.json` sem `apresentacao_atual`
+    utilizável."""
 
 
 def carregar_regras_angulo(caminho: Path = CAMINHO_REGRAS_PADRAO) -> dict:
@@ -205,68 +224,28 @@ def problemas_de_estrutura(mensagens: dict, config_afirmacao: Optional[dict]) ->
     return problemas
 
 
-def carregar_aberturas(caminho: Path = CAMINHO_ABERTURAS_PADRAO) -> dict:
-    """`{"A": {"nome", "texto"}, "B": {...}}` de
-    `config/remetente_apresentacao.json`, com `{segment_positioning}`
-    resolvido (decisão do diretor, 27/09/2026, mudanças 3 e 4)."""
+def carregar_apresentacao(caminho: Path = CAMINHO_ABERTURAS_PADRAO) -> str:
+    """Texto único da apresentação usada em toda mensagem do D12 (D12 Fase
+    5.1, decisão do diretor, 29/09/2026 -- aposentadoria da abertura A/B: as
+    duas variantes já tinham exatamente o mesmo texto desde a Fase 5, que
+    retirou a especialização de setor e a menção a Google Business Profile;
+    esta fase remove a maquinaria de alternância em si, que não representava
+    mais nenhum experimento). Substitui `carregar_aberturas`/
+    `DistribuidorVariante`, removidos nesta rodada. `apresentacao` (outra
+    chave do mesmo arquivo) continua sendo só o texto do controle histórico,
+    lido apenas por `templates_direta.py` (fora do fluxo) -- não usada
+    aqui."""
     caminho = Path(caminho)
     try:
         config = json.loads(caminho.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
-        raise ConfigAberturasInvalidaError(f"Config de aberturas ilegível em {caminho}: {e}") from e
-    variantes = config.get("variantes_abertura") or {}
-    segmento = (config.get("segment_positioning") or "").strip()
-    aberturas = {}
-    for v in VARIANTES:
-        item = variantes.get(v)
-        if not isinstance(item, dict) or not isinstance(item.get("texto"), str) or not item.get("nome"):
-            raise ConfigAberturasInvalidaError(f"Config de aberturas em {caminho} sem a variante {v!r} (nome + texto)")
-        texto = item["texto"]
-        if "{segment_positioning}" in texto and not segmento:
-            raise ConfigAberturasInvalidaError(
-                f"Variante {v!r} usa {{segment_positioning}}, mas a chave está vazia em {caminho}"
-            )
-        aberturas[v] = {"nome": item["nome"], "texto": texto.replace("{segment_positioning}", segmento)}
-    return aberturas
-
-
-class DistribuidorVariante:
-    """Alterna A/B dentro de cada estrato (ângulo, canal), na ordem das
-    linhas -- determinístico, sem sorteio (decisão do diretor, 27/09/2026:
-    "A e B devem receber tipos semelhantes de leads"). `proxima` só consulta;
-    `confirmar` conta a mensagem de fato gerada -- mensagem rejeitada pelo
-    validador não desequilibra o estrato.
-
-    Equilíbrio global (decisão do diretor, 28/09/2026): cada estrato NOVO
-    começa pela variante que está em falta no total já confirmado (empate =
-    A). Sem isso, todo estrato ímpar ou de um lead só começava em A -- no
-    pacote de 27/09 deu 37 A x 30 B. Dentro do estrato a alternância segue
-    igual."""
-
-    def __init__(self):
-        self._contagem = {}
-        self._inicio = {}
-        self._total = {v: 0 for v in VARIANTES}
-
-    def _variante_em_falta(self) -> str:
-        return min(VARIANTES, key=lambda v: (self._total[v], VARIANTES.index(v)))
-
-    def proxima(self, angulo: str, canal: str) -> str:
-        estrato = (angulo, canal)
-        inicio = self._inicio.get(estrato)
-        if inicio is None:
-            inicio = VARIANTES.index(self._variante_em_falta())
-        return VARIANTES[(inicio + self._contagem.get(estrato, 0)) % len(VARIANTES)]
-
-    def confirmar(self, angulo: str, canal: str) -> None:
-        estrato = (angulo, canal)
-        variante = self.proxima(angulo, canal)
-        self._inicio.setdefault(estrato, VARIANTES.index(variante))
-        self._contagem[estrato] = self._contagem.get(estrato, 0) + 1
-        self._total[variante] += 1
-
-    def totais(self) -> dict:
-        return dict(self._total)
+        raise ConfigApresentacaoInvalidaError(f"Config de apresentação ilegível em {caminho}: {e}") from e
+    texto = config.get("apresentacao_atual")
+    if not isinstance(texto, str) or not texto.strip():
+        raise ConfigApresentacaoInvalidaError(
+            f"Config de apresentação em {caminho} sem 'apresentacao_atual' utilizável"
+        )
+    return texto
 
 
 def carregar_cidade_busca(caminho: Path = CAMINHO_CIDADE_PADRAO) -> str:
@@ -510,8 +489,8 @@ def montar_mensagem_nata(
     incluir_consequencia: bool = True,
 ) -> tuple:
     """Devolve `(mensagem, entrada_derivada)` para os ângulos `contato`,
-    `poucas_avaliacoes` e `lentidao`. `apresentacao` é o texto da ABERTURA
-    da variante (A ou B -- `carregar_aberturas`); o corpo não depende dela.
+    `poucas_avaliacoes` e `lentidao`. `apresentacao` é o texto único da
+    apresentação (`carregar_apresentacao`); o corpo não depende dela.
     `entrada_derivada` é o dict mínimo com só os números que a mensagem pode
     citar -- usado por `validar_mensagem_angulo` (checagem 7, "número fora
     da entrada", reusada sem reimplementar). Ângulo sem os fatos necessários
@@ -583,8 +562,8 @@ def montar_mensagem_direta(
     angulo: str, linha_csv: dict, *, apresentacao: str, mensagens: dict, incluir_consequencia: bool = True,
 ) -> tuple:
     """Devolve `(mensagem, entrada_derivada)` para `sem_site`/`portal`/
-    `rede_social`/`construtor`. `apresentacao` é a ABERTURA da variante.
-    Quando nota/avaliações não estão confirmadas no CSV humano (colunas
+    `rede_social`/`construtor`. `apresentacao` é o texto único da
+    apresentação. Quando nota/avaliações não estão confirmadas no CSV humano (colunas
     `nota`/`avaliacoes`) OU as avaliações são 0, usa a variante "sem
     reputação" (decisão do diretor, 24/09/2026, sétima rodada).
     `{portal}`/`{rede}`/`{constructor}` são o nome legível pelo domínio do

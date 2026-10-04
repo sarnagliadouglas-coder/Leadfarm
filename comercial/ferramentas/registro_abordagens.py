@@ -49,10 +49,17 @@ _CHAVES_FUNIL_OBRIGATORIAS = ("etapa", "resultado", "mensagem", "decidi_nao_envi
 # config/funil_planilha.json) -- só o título da coluna mudou.
 COLUNAS_FUNIL = ("Etapa", "Resultado", "Enviada como", "Motivo da edição", "Decidi não enviar", "Motivo de não enviar")
 
-# "angulo" e "variante" (decisão do diretor, 27/09/2026, teste A/B da
-# abertura) ficam no FIM: um registro já existente, com o cabeçalho antigo,
-# ganha as duas colunas no fim do cabeçalho e a escrita é feita por NOME de
-# coluna (`_escrever_por_cabecalho`) -- nenhuma coluna antiga muda de posição.
+# "angulo" e "variante" ficam no FIM: um registro já existente, com o
+# cabeçalho antigo, ganha as duas colunas no fim do cabeçalho e a escrita é
+# feita por NOME de coluna (`_escrever_por_cabecalho`) -- nenhuma coluna
+# antiga muda de posição. "variante" nasceu em 27/09/2026 para o teste A/B da
+# abertura, aposentado em 29/09/2026 (D12 Fase 5.1) -- a coluna É PRESERVADA
+# por valor histórico (registros anteriores à aposentadoria têm rótulo A/B
+# real, de quando as duas variantes ainda tinham texto diferente); linhas
+# registradas a partir de agora chegam sempre com "variante" vazio, porque a
+# planilha de envio não tem mais essa coluna (`planilha_envio.py` não gera
+# "Variante" -- `_valor(linha, "Variante")`, abaixo, já resolve para "" nesse
+# caso, sem erro). Não usar "variante" vazio como sinal de erro.
 COLUNAS_REGISTRO = (
     "place_id", "nome", "telefone", "aba_origem", "enviado_em",
     "canal", "modelo", "custo_usd", "registrado_em",

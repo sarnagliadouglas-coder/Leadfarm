@@ -684,3 +684,17 @@ def test_carregar_mensagens_angulo_sem_chaves_exigidas_levanta_erro(tmp_path):
 def test_carregar_cidade_busca_arquivo_ausente_levanta_erro_claro(tmp_path):
     with pytest.raises(am.ConfigCidadeBuscaInvalidaError, match="não encontrada"):
         am.carregar_cidade_busca(tmp_path / "nao-existe.json")
+
+
+# --- tipo de CTA por ângulo (D12 Fase 5, 29/09/2026) -------------------------
+
+
+def test_cta_tipo_por_angulo_cobre_todos_os_angulos_com_mensagem():
+    """`construtor` não recebe Revisión breve neste rollout (sem captura
+    automática -- classe_site != "proprio"); `contato`/`lentidao` oferecem;
+    os demais mantêm o CTA diagnóstico da Fase 3."""
+    assert am.CTA_TIPO_POR_ANGULO["contato"] == "revision"
+    assert am.CTA_TIPO_POR_ANGULO["lentidao"] == "revision"
+    assert am.CTA_TIPO_POR_ANGULO["construtor"] == "confirmacion"
+    for angulo in ("poucas_avaliacoes", "sem_site", "portal", "rede_social"):
+        assert am.CTA_TIPO_POR_ANGULO[angulo] == "diagnostico"

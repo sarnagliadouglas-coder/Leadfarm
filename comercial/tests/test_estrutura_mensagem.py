@@ -1,7 +1,11 @@
 """Testes das 4 mudanças conceituais (decisão do diretor, 27/09/2026):
 classificador FATO / IMPLICACAO_PLAUSIVEL / RESULTADO_NAO_SUSTENTADO
-(`afirmacao.py` + checagem 13 do validador), estrutura fato -> consequência
--> CTA dos modelos, aberturas A/B e distribuição da variante.
+(`afirmacao.py` + checagem 13 do validador) e estrutura fato -> consequência
+-> CTA dos modelos. A abertura A/B (mudança 4, mesma data) foi aposentada em
+29/09/2026 (D12 Fase 5.1) -- as duas variantes já tinham o mesmo texto desde
+a Fase 5, sem nenhum experimento por trás; os testes de alternância/
+distribuição foram removidos com o código que testavam
+(`DistribuidorVariante`, `carregar_aberturas`), não afrouxados.
 
 Prova nas duas pontas (~/.claude/CLAUDE.md §4): o que deve passar passa, o
 que deve falhar falha, e cada regra tem controle negativo -- inclusive o
@@ -21,7 +25,7 @@ import validador_mensagem
 _CONFIG_VALIDACAO = validador_mensagem.carregar_config()
 _AFIRMACAO = _CONFIG_VALIDACAO["afirmacao"]
 _MENSAGENS_REAIS = am.carregar_mensagens_angulo()
-_ABERTURAS_REAIS = am.carregar_aberturas()
+_APRESENTACAO_REAL = am.carregar_apresentacao()
 
 _VALORES = dict(nota="4,8", n=8, reseñas_palavra="reseñas", s=11, portal="Top Doctors", rede="Instagram",
                 constructor="WordPress")
@@ -149,14 +153,13 @@ def test_consequencia_null_e_aceita():
     assert _MENSAGENS_REAIS["portal"]["consequencia"] is None
 
 
-# --- mensagens reais: A e B, com e sem consequência -----------------------------------
+# --- mensagens reais, com e sem consequência -----------------------------------
 
 
-@pytest.mark.parametrize("variante", am.VARIANTES)
 @pytest.mark.parametrize("chave", am.MODELOS)
-def test_todo_modelo_real_passa_no_validador_nas_duas_variantes(chave, variante):
+def test_todo_modelo_real_passa_no_validador(chave):
     mensagem = am.compor_mensagem(
-        _MENSAGENS_REAIS[chave], _MENSAGENS_REAIS["saudacao"], _ABERTURAS_REAIS[variante]["texto"], **_VALORES,
+        _MENSAGENS_REAIS[chave], _MENSAGENS_REAIS["saudacao"], _APRESENTACAO_REAL, **_VALORES,
     )
     resultado = am.validar_mensagem_angulo(mensagem, chave, _ENTRADA, config_validacao=_CONFIG_VALIDACAO)
     assert resultado.valido, (mensagem, resultado.motivos)
@@ -165,30 +168,22 @@ def test_todo_modelo_real_passa_no_validador_nas_duas_variantes(chave, variante)
 @pytest.mark.parametrize("chave", am.MODELOS)
 def test_tirar_a_consequencia_nao_invalida_o_fato(chave):
     """Critério de aceitação da mudança 2: a consequência pode ser removida
-    sem invalidar o fato original."""
+    sem invalidar o fato original. Comparação sem diferenciar maiúscula --
+    a apresentação atual não termina em ':', então a mensagem final
+    capitaliza a primeira letra do fato; o teste continua provando o
+    CONTEÚDO do fato, não a capitalização, que é regra de
+    `compor_mensagem`, não deste caso."""
     modelo = _MENSAGENS_REAIS[chave]
-    com = am.compor_mensagem(modelo, "Hola, buenas.", _ABERTURAS_REAIS["B"]["texto"], **_VALORES)
+    com = am.compor_mensagem(modelo, "Hola, buenas.", _APRESENTACAO_REAL, **_VALORES)
     sem = am.compor_mensagem(
-        modelo, "Hola, buenas.", _ABERTURAS_REAIS["B"]["texto"], incluir_consequencia=False, **_VALORES,
+        modelo, "Hola, buenas.", _APRESENTACAO_REAL, incluir_consequencia=False, **_VALORES,
     )
     fato = modelo["fato"].format(**_VALORES)
-    assert fato in com and fato in sem
+    assert fato.lower() in com.lower() and fato.lower() in sem.lower()
     if modelo["consequencia"]:
-        assert modelo["consequencia"].format(**_VALORES) not in sem
+        assert modelo["consequencia"].format(**_VALORES).lower() not in sem.lower()
     resultado = am.validar_mensagem_angulo(sem, chave, _ENTRADA, config_validacao=_CONFIG_VALIDACAO)
     assert resultado.valido, resultado.motivos
-
-
-@pytest.mark.parametrize("chave", am.MODELOS)
-def test_corpo_e_identico_entre_a_e_b(chave):
-    """O A/B isola SÓ a abertura (decisão 6)."""
-    modelo = _MENSAGENS_REAIS[chave]
-    a = am.compor_mensagem(modelo, "Hola, buenas.", _ABERTURAS_REAIS["A"]["texto"], **_VALORES)
-    b = am.compor_mensagem(modelo, "Hola, buenas.", _ABERTURAS_REAIS["B"]["texto"], **_VALORES)
-    corpo_a = a.split(_ABERTURAS_REAIS["A"]["texto"], 1)[1].strip()
-    corpo_b = b.split(_ABERTURAS_REAIS["B"]["texto"], 1)[1].strip()
-    assert corpo_a.lower() == corpo_b.lower()
-    assert corpo_a[0].isupper() and corpo_b[0].islower()
 
 
 def test_poucas_avaliacoes_nao_conta_mais_a_historia_causal():
@@ -199,97 +194,29 @@ def test_poucas_avaliacoes_nao_conta_mais_a_historia_causal():
         assert "sale contento" not in texto
 
 
-# --- aberturas ----------------------------------------------------------------------
+# --- apresentação (D12 Fase 5.1, aposentadoria da abertura A/B, 29/09/2026) ----------
 
 
-def test_abertura_b_explica_o_motivo_antes_e_resolve_o_segmento():
-    b = _ABERTURAS_REAIS["B"]["texto"]
-    assert "{segment_positioning}" not in b
-    assert "profesionales" in b
-    assert b.endswith(":")
-    assert _ABERTURAS_REAIS["A"]["nome"] == "service_first"
-    assert _ABERTURAS_REAIS["B"]["nome"] == "problem_first"
+def test_apresentacao_real_e_universal():
+    """`carregar_apresentacao` devolve um texto único, sem especialização de
+    setor nem menção a Google Business Profile (D12 Fases 1-3). Substitui os
+    testes antigos de A/B (`carregar_aberturas`, variantes, segmento) --
+    removidos com o mecanismo que testavam, não afrouxados."""
+    assert _APRESENTACAO_REAL == "Soy Douglas Fonseca, ayudo a negocios locales con su presencia online."
+    for termo in ("salud", "consultas", "pacientes", "psicólog", "médic", "ficha de Google", "{segment_positioning}"):
+        assert termo not in _APRESENTACAO_REAL
 
 
-def test_trocar_o_segmento_muda_so_a_abertura(tmp_path):
-    config = json.loads(am.CAMINHO_ABERTURAS_PADRAO.read_text(encoding="utf-8"))
-    config["segment_positioning"] = "psicólogos"
-    caminho = tmp_path / "aberturas.json"
-    caminho.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
-    aberturas = am.carregar_aberturas(caminho)
-    assert "trabajo con webs para psicólogos." in aberturas["B"]["texto"]
-    assert aberturas["A"] == _ABERTURAS_REAIS["A"]
+def test_carregar_apresentacao_arquivo_sem_chave_levanta_erro(tmp_path):
+    caminho = tmp_path / "apresentacao.json"
+    caminho.write_text(json.dumps({}), encoding="utf-8")
+    with pytest.raises(am.ConfigApresentacaoInvalidaError):
+        am.carregar_apresentacao(caminho)
 
 
-def test_segmento_vazio_com_placeholder_levanta_erro(tmp_path):
-    config = json.loads(am.CAMINHO_ABERTURAS_PADRAO.read_text(encoding="utf-8"))
-    config["segment_positioning"] = "  "
-    caminho = tmp_path / "aberturas.json"
-    caminho.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
-    with pytest.raises(am.ConfigAberturasInvalidaError):
-        am.carregar_aberturas(caminho)
-
-
-def test_variante_ausente_levanta_erro(tmp_path):
-    config = json.loads(am.CAMINHO_ABERTURAS_PADRAO.read_text(encoding="utf-8"))
-    del config["variantes_abertura"]["B"]
-    caminho = tmp_path / "aberturas.json"
-    caminho.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
-    with pytest.raises(am.ConfigAberturasInvalidaError, match="'B'"):
-        am.carregar_aberturas(caminho)
-
-
-# --- distribuição A/B ---------------------------------------------------------------
-
-
-def test_distribuidor_alterna_dentro_do_estrato():
-    d = am.DistribuidorVariante()
-    vistos = []
-    for _ in range(4):
-        v = d.proxima("lentidao", "whatsapp")
-        vistos.append(v)
-        d.confirmar("lentidao", "whatsapp")
-    assert vistos == ["A", "B", "A", "B"]
-
-
-def test_distribuidor_estrato_novo_comeca_pela_variante_em_falta():
-    """Decisão do diretor, 28/09/2026: estrato novo começa pela variante que
-    está em falta no total -- não sempre em A."""
-    d = am.DistribuidorVariante()
-    d.confirmar("lentidao", "whatsapp")          # A (empate -> A)
-    assert d.proxima("lentidao", "whatsapp") == "B"   # alternância dentro do estrato
-    assert d.proxima("lentidao", "email") == "B"      # estrato novo: falta B
-    assert d.proxima("contato", "whatsapp") == "B"
-
-
-def test_distribuidor_estratos_de_um_lead_so_ficam_equilibrados():
-    """Controle do defeito de 27/09 (37 A x 30 B): muitos estratos de um lead
-    só -- antes todos saíam A."""
-    d = am.DistribuidorVariante()
-    saidas = []
-    for i in range(6):
-        estrato = (f"angulo{i}", "email")
-        saidas.append(d.proxima(*estrato))
-        d.confirmar(*estrato)
-    assert saidas == ["A", "B", "A", "B", "A", "B"]
-    assert d.totais() == {"A": 3, "B": 3}
-
-
-def test_distribuidor_estrato_ja_iniciado_mantem_a_propria_alternancia():
-    d = am.DistribuidorVariante()
-    d.confirmar("x", "email")                     # A
-    d.confirmar("y", "email")                     # B (em falta)
-    d.confirmar("y", "email")                     # A (alterna dentro de y)
-    assert d.proxima("y", "email") == "B"
-    assert d.proxima("x", "email") == "B"
-
-
-def test_distribuidor_sem_confirmar_nao_avanca():
-    """Mensagem rejeitada pelo validador não é confirmada -- não
-    desequilibra o estrato."""
-    d = am.DistribuidorVariante()
-    assert d.proxima("contato", "whatsapp") == "A"
-    assert d.proxima("contato", "whatsapp") == "A"
+def test_carregar_apresentacao_arquivo_ilegivel_levanta_erro(tmp_path):
+    with pytest.raises(am.ConfigApresentacaoInvalidaError):
+        am.carregar_apresentacao(tmp_path / "nao-existe.json")
 
 
 # --- guarda do construtor (decisão 4) ------------------------------------------------

@@ -24,6 +24,7 @@ from planilha_envio import (
     COLUNAS_NATA,
     LIMITE_CELULA_XLSX,
     STATUS_SEM_MENSAGEM,
+    LinkInconsistenteError,
     PlaceIdAusenteError,
     PlanilhaJaExisteError,
     determinar_canal,
@@ -36,8 +37,10 @@ from planilha_envio import (
     montar_linhas_nata,
     place_ids_ja_abordados,
     profissional_detectado,
+    verificar_consistencia_links,
     _sem_caracteres_ilegais,
     _validar_place_ids,
+    _verificar_links_aba,
 )
 
 _ASSUNTOS_EMAIL = {"direta": "Una observación sobre su perfil en Google", "nata": "Una observación sobre su web"}
@@ -81,13 +84,9 @@ _MENSAGENS_ANGULO = {
     "nomes_rede": {"instagram.com": "Instagram"},
     "nomes_construtor": {"wordpress.com": "WordPress"},
 }
-# Aberturas vazias por padrão: os testes de linha olham o corpo; os de A/B
-# usam _ABERTURAS_AB.
-_ABERTURAS = {"A": {"nome": "service_first", "texto": ""}, "B": {"nome": "problem_first", "texto": ""}}
-_ABERTURAS_AB = {
-    "A": {"nome": "service_first", "texto": "Soy Douglas, hago webs."},
-    "B": {"nome": "problem_first", "texto": "Soy Douglas y vi algo concreto que quería comentarle:"},
-}
+# Apresentação vazia por padrão: os testes de linha olham o corpo, não a
+# abertura (a abertura A/B foi aposentada em 29/09/2026, D12 Fase 5.1).
+_APRESENTACAO = ""
 _CONFIG_VALIDACAO = {
     "max_palavras_mensagem_1": 80,
     "simbolos_moeda": ["€"],
@@ -100,7 +99,7 @@ _CONFIG_VALIDACAO = {
 
 def _kwargs_comuns(diretorio_capturas):
     return dict(
-        aberturas=_ABERTURAS, config_validacao=_CONFIG_VALIDACAO, assuntos_email=_ASSUNTOS_EMAIL,
+        apresentacao=_APRESENTACAO, config_validacao=_CONFIG_VALIDACAO, assuntos_email=_ASSUNTOS_EMAIL,
         mensagens_angulo=_MENSAGENS_ANGULO, diretorio_capturas=diretorio_capturas,
     )
 
@@ -645,9 +644,14 @@ def _csv_humano(tmp_path, linhas):
 
 def _kwargs_gerar_planilha(tmp_path, **over):
     base = dict(
-        aberturas=_ABERTURAS, config_validacao=_CONFIG_VALIDACAO, assuntos_email=_ASSUNTOS_EMAIL,
+        apresentacao=_APRESENTACAO, config_validacao=_CONFIG_VALIDACAO, assuntos_email=_ASSUNTOS_EMAIL,
         opcoes_funil=_OPCOES_FUNIL, regras_angulo=_REGRAS_ANGULO, mensagens_angulo=_MENSAGENS_ANGULO,
         diretorio_capturas=tmp_path / "_capturas_inexistente",
+        # Isola a entrega consolidada num diretório de teste -- sem isto,
+        # gerar_planilha cairia no COMERCIAL_PLANILHAS_DIR real (comercial/.env)
+        # e escreveria na pasta de verdade do diretor durante o teste (mesmo
+        # defeito já documentado em env_loader.py pra ANTHROPIC_API_KEY).
+        consolidada_dir=tmp_path / "_consolidada_teste",
     )
     base.update(over)
     return base
@@ -683,13 +687,11 @@ def test_gerar_planilha_grava_geral_nata_e_como_usar_e_nunca_sobrescreve(tmp_pat
         )
 
 
-def test_como_usar_descreve_o_teste_ab_e_a_classificacao_da_resposta(tmp_path, monkeypatch):
-    """Especificação final do MVP, 25/09/2026: sai a regra de comparar a
-    posição no Google Maps. Décima rodada (27/09/2026, decisão 8): a regra
-    "não mudar os modelos antes de 40 a 50 mensagens" vira a do teste A/B
-    da abertura -- comparar A e B dentro do mesmo ângulo e canal, pela taxa
-    de resposta, sem chamar um lote pequeno de prova -- e entra como
-    classificar a resposta (positiva/neutra/negativa)."""
+def test_como_usar_nao_menciona_mais_o_teste_ab_e_classifica_a_resposta(tmp_path, monkeypatch):
+    """D12 Fase 5.1 (29/09/2026): a aba "Como usar" deixa de instruir Douglas
+    a comparar variantes -- não existe mais experimento de abertura. A
+    classificação da resposta (positiva/neutra/negativa) continua, sem a
+    ressalva "decida antes de olhar a variante" (não há mais variante)."""
     import contrato_loader
 
     caminho_csv = _csv_humano(tmp_path, [_linha_csv()])
@@ -703,13 +705,11 @@ def test_como_usar_descreve_o_teste_ab_e_a_classificacao_da_resposta(tmp_path, m
     wb = load_workbook(resultado["caminho"])
     titulos = [c.value for c in wb["Como usar"]["A"]]
     textos = [c.value for c in wb["Como usar"]["B"]]
-    assert "Teste A/B da abertura" in titulos
-    assert "Comparar A e B" in titulos
+    assert "Teste A/B da abertura" not in titulos
+    assert "Comparar A e B" not in titulos
     assert "Classificar a resposta" in titulos
-    assert "Ajuste de modelos" not in titulos
-    assert any("mesmo ângulo e canal" in (t or "") for t in textos)
     assert any("resposta neutra" in (t or "") for t in textos)
-    assert any("nunca \"B é comprovadamente melhor\"" in (t or "") for t in textos)
+    assert not any("variante" in (t or "").lower() for t in textos)
     assert not any("Google Maps" in (t or "") for t in textos)
 
 
@@ -863,6 +863,291 @@ def test_contexto_ia_geral_angulo_ausente_diz_nenhum():
     assert "ÂNGULO: (nenhum)" in contexto
 
 
+# --- Planilha consolidada (entrega do diretor, fora do repo, acrescentada) --
+# Decisão do diretor, 01/10/2026: sempre DUAS entregas -- a interna (programa,
+# uma planilha nova por rodada, 3 abas) e a consolidada (diretor, um único
+# arquivo que cada rodada ABRE e ACRESCENTA, 2 abas, nunca recriado).
+
+
+def test_atualizar_planilha_consolidada_cria_do_zero_quando_nao_existe(tmp_path):
+    destino = tmp_path / "consolidada"
+    linhas_geral = [{"place_id": "g1", "nome": "Geral Um"}]
+    linhas_nata = [{"place_id": "n1", "nome": "Nata Um"}]
+
+    resultado = pe.atualizar_planilha_consolidada(
+        linhas_geral=linhas_geral, linhas_nata=linhas_nata, diretorio=destino,
+    )
+
+    assert resultado["pulado"] is False
+    assert resultado["novos_geral"] == 1
+    assert resultado["novos_nata"] == 1
+    caminho = resultado["caminho"]
+    assert caminho == destino / pe.NOME_PLANILHA_CONSOLIDADA
+    assert caminho.is_file()
+
+    wb = load_workbook(caminho)
+    assert wb.sheetnames == ["Geral", "Nata"]  # sem "Como usar"
+    assert wb["Geral"].cell(1, 1).value == COLUNAS_GERAL[0]
+    assert wb["Geral"].cell(2, COLUNAS_GERAL.index("nome") + 1).value == "Geral Um"
+    assert wb["Nata"].cell(2, COLUNAS_NATA.index("nome") + 1).value == "Nata Um"
+
+
+def test_atualizar_planilha_consolidada_acrescenta_sem_recriar(tmp_path):
+    destino = tmp_path / "consolidada"
+    pe.atualizar_planilha_consolidada(
+        linhas_geral=[{"place_id": "g1", "nome": "Primeira rodada"}],
+        linhas_nata=[{"place_id": "n1", "nome": "Primeira rodada nata"}],
+        diretorio=destino,
+    )
+
+    resultado = pe.atualizar_planilha_consolidada(
+        linhas_geral=[{"place_id": "g2", "nome": "Segunda rodada"}],
+        linhas_nata=[],
+        diretorio=destino,
+    )
+
+    assert resultado["novos_geral"] == 1
+    assert resultado["novos_nata"] == 0
+    wb = load_workbook(resultado["caminho"])
+    nomes_geral = [row[COLUNAS_GERAL.index("nome")] for row in wb["Geral"].iter_rows(min_row=2, values_only=True)]
+    assert nomes_geral == ["Primeira rodada", "Segunda rodada"]
+    # a aba Nata não ganhou linha em branco nem cabeçalho duplicado na 2ª rodada
+    assert wb["Nata"].max_row == 2
+
+
+def test_atualizar_planilha_consolidada_nao_duplica_place_id_ja_presente(tmp_path):
+    destino = tmp_path / "consolidada"
+    pe.atualizar_planilha_consolidada(
+        linhas_geral=[{"place_id": "g1", "nome": "Já estava"}], linhas_nata=[], diretorio=destino,
+    )
+
+    resultado = pe.atualizar_planilha_consolidada(
+        linhas_geral=[{"place_id": "g1", "nome": "Já estava"}, {"place_id": "g2", "nome": "Novo"}],
+        linhas_nata=[],
+        diretorio=destino,
+    )
+
+    assert resultado["novos_geral"] == 1  # só g2 -- g1 já estava na aba
+    wb = load_workbook(resultado["caminho"])
+    place_ids = [row[COLUNAS_GERAL.index("place_id")] for row in wb["Geral"].iter_rows(min_row=2, values_only=True)]
+    assert place_ids == ["g1", "g2"]
+
+
+def test_atualizar_planilha_consolidada_pulada_sem_diretorio_configurado(monkeypatch):
+    monkeypatch.delenv(pe.ENV_CONSOLIDADA_DIR, raising=False)
+    monkeypatch.setattr(pe.env_loader, "carregar_env", lambda *a, **k: [])
+
+    resultado = pe.atualizar_planilha_consolidada(linhas_geral=[], linhas_nata=[])
+
+    assert resultado["pulado"] is True
+    assert pe.ENV_CONSOLIDADA_DIR in resultado["motivo"]
+
+
+def test_gerar_planilha_tambem_atualiza_a_consolidada(tmp_path, monkeypatch):
+    import contrato_loader
+
+    caminho_csv = _csv_humano(tmp_path, [_linha_csv()])
+    monkeypatch.setattr(contrato_loader, "carregar_lote", lambda **kwargs: _lote_falso(nata=[_lead_nata()]))
+    consolidada_dir = tmp_path / "_consolidada"
+
+    resultado = gerar_planilha(
+        caminho_csv_humano=caminho_csv, saida_dir=tmp_path / "_planilhas",
+        agora=datetime(2026, 10, 1, 9, 0, 0, tzinfo=timezone.utc),
+        **_kwargs_gerar_planilha(tmp_path, consolidada_dir=consolidada_dir),
+    )
+
+    consolidada = resultado["consolidada"]
+    assert consolidada["pulado"] is False
+    assert consolidada["caminho"] == consolidada_dir / pe.NOME_PLANILHA_CONSOLIDADA
+    assert consolidada["novos_geral"] == 1
+    assert consolidada["novos_nata"] == 1
+    wb = load_workbook(consolidada["caminho"])
+    assert wb.sheetnames == ["Geral", "Nata"]
+
+
+# --- Checagem de hyperlink desalinhado (defeito real, 01/10/2026) ----------
+# `ws.delete_rows()` desloca o TEXTO das células mas não realinha o objeto
+# `hyperlink` do openpyxl -- achado numa limpeza manual da planilha
+# consolidada que corrompeu os links de WhatsApp/e-mail (cada linha abria o
+# WhatsApp/e-mail de OUTRO lead). `_verificar_links_aba` é a rede que pega
+# isso antes de qualquer planilha sair com link errado.
+
+
+def _ws_com_link(colunas, linhas_dados, texto_wa=None, hyperlink_wa=None):
+    """Monta uma aba mínima com uma linha de dado e controla separadamente o
+    TEXTO visível e o destino do hyperlink da célula WhatsApp -- é exatamente
+    essa divergência que `_verificar_links_aba` precisa detectar."""
+    wb = Workbook()
+    ws = wb.active
+    ws.append(list(colunas))
+    for linha in linhas_dados:
+        ws.append([linha.get(c, "") for c in colunas])
+    if texto_wa is not None:
+        idx = colunas.index("WhatsApp") + 1
+        cel = ws.cell(2, idx)
+        cel.value = texto_wa
+        if hyperlink_wa:
+            cel.hyperlink = hyperlink_wa
+    return ws
+
+
+def test_verificar_links_aba_sem_problema_quando_tudo_bate():
+    colunas = ("telefone", "email", "WhatsApp", "Abrir e-mail")
+    ws = _ws_com_link(
+        colunas, [{"telefone": "600000101", "email": "", "WhatsApp": "https://wa.me/34600000101"}],
+        texto_wa="https://wa.me/34600000101", hyperlink_wa="https://wa.me/34600000101",
+    )
+    assert _verificar_links_aba("Geral", ws, colunas) == []
+
+
+def test_verificar_links_aba_sem_hyperlink_nenhum_nao_e_problema():
+    """Controle: linha sem link nenhum (canal não aplicável) não gera queixa --
+    ausência de link não é o defeito que esta checagem cobre."""
+    colunas = ("telefone", "email", "WhatsApp", "Abrir e-mail")
+    ws = _ws_com_link(colunas, [{"telefone": "", "email": "", "WhatsApp": ""}])
+    assert _verificar_links_aba("Geral", ws, colunas) == []
+
+
+def test_verificar_links_aba_detecta_link_da_linha_anterior():
+    """Reproduz o defeito real: hyperlink da linha aponta pro telefone de
+    OUTRA linha (não o da própria linha) -- exatamente o sintoma do relatório
+    (`delete_rows` desloca texto mas não o hyperlink). Texto da célula é
+    igual ao hyperlink (ambos "errados" do mesmo jeito) pra isolar só o
+    sintoma do telefone trocado, sem also acionar a checagem de texto!=link."""
+    colunas = ("telefone", "email", "WhatsApp", "Abrir e-mail")
+    ws = _ws_com_link(
+        colunas, [{"telefone": "600000301", "email": "", "WhatsApp": "https://wa.me/34600000302"}],
+        texto_wa="https://wa.me/34600000302", hyperlink_wa="https://wa.me/34600000302",  # telefone de outro lead
+    )
+    problemas = _verificar_links_aba("Geral", ws, colunas)
+    assert len(problemas) == 1
+    assert "não corresponde ao telefone" in problemas[0]
+
+
+def test_verificar_links_aba_detecta_texto_diferente_do_link():
+    colunas = ("telefone", "email", "WhatsApp", "Abrir e-mail")
+    ws = _ws_com_link(
+        colunas, [{"telefone": "600000101", "email": "", "WhatsApp": "https://wa.me/34600000101"}],
+        texto_wa="texto velho", hyperlink_wa="https://wa.me/34600000101",
+    )
+    problemas = _verificar_links_aba("Geral", ws, colunas)
+    assert any("difere do link" in p for p in problemas)
+
+
+def test_verificar_links_aba_detecta_mailto_sem_email_na_linha():
+    colunas = ("telefone", "email", "WhatsApp", "Abrir e-mail")
+    ws = Workbook().active
+    ws.append(list(colunas))
+    ws.append(["", "", "", "mailto:alguem@exemplo.com"])
+    idx = colunas.index("Abrir e-mail") + 1
+    ws.cell(2, idx).hyperlink = "mailto:alguem@exemplo.com"
+    problemas = _verificar_links_aba("Geral", ws, colunas)
+    assert any("não tem email" in p for p in problemas)
+
+
+def test_verificar_consistencia_links_le_arquivo_e_agrupa_por_aba(tmp_path):
+    caminho = tmp_path / "planilha.xlsx"
+    wb = Workbook()
+    ws1 = wb.active
+    ws1.title = "Geral"
+    ws1.append(["telefone", "email", "WhatsApp", "Abrir e-mail"])
+    ws1.append(["600000101", "", "https://wa.me/34999999999", ""])
+    ws1.cell(2, 3).hyperlink = "https://wa.me/34999999999"  # errado de propósito, texto==link
+    ws2 = wb.create_sheet("Nata")
+    ws2.append(["telefone", "email", "WhatsApp", "Abrir e-mail"])
+    ws2.append(["600000102", "", "https://wa.me/34600000102", ""])
+    ws2.cell(2, 3).hyperlink = "https://wa.me/34600000102"  # certo
+    wb.save(caminho)
+
+    resultado = verificar_consistencia_links(caminho)
+
+    assert len(resultado["Geral"]) == 1
+    assert resultado["Nata"] == []
+
+
+def test_gerar_planilha_levanta_link_inconsistente_e_nao_grava_nada(tmp_path, monkeypatch):
+    """Se `_linha_geral`/`_linha_nata` algum dia produzissem um link
+    desalinhado, `gerar_planilha` tem que falhar ANTES de gravar -- mesmo
+    espírito de `PlaceIdAusenteError`: nunca uma planilha incompleta/errada
+    em silêncio. Simulado forçando `_verificar_links_aba` a sempre achar
+    problema, já que reproduzir o desalinhamento real exigiria sujar
+    `_linha_geral` só pro teste."""
+    import contrato_loader
+    import planilha_envio as pe_mod
+
+    caminho_csv = _csv_humano(tmp_path, [_linha_csv()])
+    monkeypatch.setattr(contrato_loader, "carregar_lote", lambda **kwargs: _lote_falso())
+    monkeypatch.setattr(pe_mod, "_verificar_links_aba", lambda *a, **k: ["problema forçado pelo teste"])
+
+    saida_dir = tmp_path / "_planilhas"
+    with pytest.raises(LinkInconsistenteError):
+        gerar_planilha(
+            caminho_csv_humano=caminho_csv, saida_dir=saida_dir,
+            agora=datetime(2026, 10, 1, 9, 0, 0, tzinfo=timezone.utc),
+            **_kwargs_gerar_planilha(tmp_path),
+        )
+
+    assert list(saida_dir.glob("*.xlsx")) == []  # nada foi gravado
+
+
+def test_atualizar_planilha_consolidada_levanta_e_nao_salva_se_ja_existia_quebrada(tmp_path, monkeypatch):
+    """Mesma garantia na consolidada: se a aba já reaberta tiver um link
+    desalinhado (ex.: sobrevivente de uma rodada anterior corrompida), a
+    atualização falha e o arquivo em disco NÃO é tocado -- em vez de
+    acrescentar linhas boas por cima de um arquivo já quebrado."""
+    import planilha_envio as pe_mod
+
+    destino = tmp_path / "consolidada"
+    pe.atualizar_planilha_consolidada(
+        linhas_geral=[{"place_id": "g1", "nome": "Lead Um", "telefone": "600000101", "WhatsApp": "https://wa.me/34600000101"}],
+        linhas_nata=[], diretorio=destino,
+    )
+    antes = (destino / pe.NOME_PLANILHA_CONSOLIDADA).stat().st_mtime
+
+    monkeypatch.setattr(pe_mod, "_verificar_links_aba", lambda *a, **k: ["problema forçado pelo teste"])
+    with pytest.raises(LinkInconsistenteError):
+        pe.atualizar_planilha_consolidada(
+            linhas_geral=[{"place_id": "g2", "nome": "Lead Dois"}], linhas_nata=[], diretorio=destino,
+        )
+
+    depois = (destino / pe.NOME_PLANILHA_CONSOLIDADA).stat().st_mtime
+    assert antes == depois  # arquivo em disco não mudou
+
+
+def test_main_verificar_imprime_ok_e_sai_0_quando_sem_problema(tmp_path, capsys):
+    caminho = tmp_path / "planilha.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Geral"
+    ws.append(["telefone", "WhatsApp"])
+    ws.append(["600000101", "https://wa.me/34600000101"])
+    ws.cell(2, 2).hyperlink = "https://wa.me/34600000101"
+    wb.save(caminho)
+
+    codigo = pe.main(["--verificar", str(caminho)])
+
+    assert codigo == 0
+    assert "OK, nenhum link desalinhado." in capsys.readouterr().out
+
+
+def test_main_verificar_sai_1_e_lista_problema_quando_ha_desalinhamento(tmp_path, capsys):
+    caminho = tmp_path / "planilha.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Geral"
+    ws.append(["telefone", "WhatsApp"])
+    ws.append(["600000101", "https://wa.me/34999999999"])
+    ws.cell(2, 2).hyperlink = "https://wa.me/34999999999"  # texto==link, só o telefone não bate
+    wb.save(caminho)
+
+    codigo = pe.main(["--verificar", str(caminho)])
+
+    saida = capsys.readouterr().out
+    assert codigo == 1
+    assert "não corresponde ao telefone" in saida
+    assert "TOTAL: 1 problema" in saida
+
+
 # --- main() (comando `python ferramentas/planilha_envio.py`) --------------
 
 
@@ -875,6 +1160,7 @@ def test_main_chama_gerar_planilha_com_saida_dir_e_imprime_resumo(tmp_path, monk
             "caminho": tmp_path / "planilha_envio_20260924-120000.xlsx",
             "excluidos_geral": 2,
             "excluidos_nata": 1,
+            "consolidada": {"pulado": True, "motivo": "COMERCIAL_PLANILHAS_DIR não definida -- consolidada pulada."},
         }
 
     monkeypatch.setattr(pe, "gerar_planilha", _gerar_planilha_falso)
@@ -887,6 +1173,7 @@ def test_main_chama_gerar_planilha_com_saida_dir_e_imprime_resumo(tmp_path, monk
     assert "planilha_envio_20260924-120000.xlsx" in saida
     assert "2 excluído" in saida
     assert "1 excluído" in saida
+    assert "[Consolidada]" in saida
 
 
 def test_main_sem_saida_dir_passa_none_para_gerar_planilha(monkeypatch):
@@ -894,7 +1181,10 @@ def test_main_sem_saida_dir_passa_none_para_gerar_planilha(monkeypatch):
 
     def _gerar_planilha_falso(*, saida_dir=None):
         chamada["saida_dir"] = saida_dir
-        return {"caminho": Path("planilha.xlsx"), "excluidos_geral": 0, "excluidos_nata": 0}
+        return {
+            "caminho": Path("planilha.xlsx"), "excluidos_geral": 0, "excluidos_nata": 0,
+            "consolidada": {"pulado": True, "motivo": "COMERCIAL_PLANILHAS_DIR não definida -- consolidada pulada."},
+        }
 
     monkeypatch.setattr(pe, "gerar_planilha", _gerar_planilha_falso)
 
@@ -902,62 +1192,15 @@ def test_main_sem_saida_dir_passa_none_para_gerar_planilha(monkeypatch):
     assert chamada["saida_dir"] is None
 
 
-# --- teste A/B da abertura (decisão do diretor, 27/09/2026) -----------------------
+# --- abertura A/B, aposentada em 29/09/2026 (D12 Fase 5.1) -------------------
+#
+# A coluna "Variante" e o distribuidor A/B (`angulo_mensagem.
+# DistribuidorVariante`) foram removidos do código -- os testes que os
+# validavam foram removidos com eles, não afrouxados: não existe mais
+# alternância nem coluna para testar. `test_colunas_geral_tem_place_id` e
+# afins continuam cobrindo a forma das colunas que sobraram.
 
 
-def test_linhas_geral_alternam_a_b_dentro_do_mesmo_angulo_e_canal(tmp_path):
-    kwargs = _kwargs_comuns(tmp_path)
-    kwargs["aberturas"] = _ABERTURAS_AB
-    leads = [_linha_csv(place_id=f"p{i}") for i in range(4)]
-    linhas = montar_linhas_geral(leads, **kwargs)
-    assert [l["Variante"] for l in linhas] == ["A", "B", "A", "B"]
-    assert linhas[0]["Mensagem sugerida"].startswith("Hola, buenas. Soy Douglas, hago webs. Vi su ficha")
-    assert linhas[1]["Mensagem sugerida"].startswith(
-        "Hola, buenas. Soy Douglas y vi algo concreto que quería comentarle: vi su ficha"
-    )
-
-
-def test_linhas_geral_estrato_novo_comeca_pela_variante_em_falta(tmp_path):
-    """Ângulo ou canal diferente é outro estrato; desde 28/09/2026 (decisão do
-    diretor) o estrato novo começa pela variante em falta no total, e dentro
-    do estrato a alternância continua."""
-    kwargs = _kwargs_comuns(tmp_path)
-    kwargs["aberturas"] = _ABERTURAS_AB
-    leads = [
-        _linha_csv(place_id="p1"),
-        _linha_csv(place_id="p2", classe_site="portal", site="https://www.doctoralia.es/x"),
-        _linha_csv(place_id="p3", telefone="", email="a@b.es"),
-        _linha_csv(place_id="p4"),
-    ]
-    linhas = montar_linhas_geral(leads, **kwargs)
-    # p1 sem_site/whatsapp: A | p2 portal (novo, falta B): B |
-    # p3 sem_site/email (novo, empate): A | p4 sem_site/whatsapp (alterna): B
-    assert [l["Variante"] for l in linhas] == ["A", "B", "A", "B"]
-
-
-def test_linha_sem_mensagem_nao_ganha_variante_nem_desequilibra(tmp_path):
-    kwargs = _kwargs_comuns(tmp_path)
-    kwargs["aberturas"] = _ABERTURAS_AB
-    leads = [
-        _linha_csv(place_id="p1"),
-        _linha_csv(place_id="p2", classe_site="proprio", site="https://clinica.es"),
-        _linha_csv(place_id="p3"),
-    ]
-    linhas = montar_linhas_geral(leads, **kwargs)
-    assert [l["Variante"] for l in linhas] == ["A", "", "B"]
-
-
-def test_linhas_nata_alternam_a_b_e_corpo_e_o_mesmo(tmp_path):
-    kwargs = _kwargs_comuns(tmp_path)
-    kwargs["aberturas"] = _ABERTURAS_AB
-    leads = [_lead_nata(place_id=f"p{i}", telefone_na_pagina="texto") for i in range(2)]
-    linhas = montar_linhas_nata(leads, [], [], regras_angulo=_REGRAS_ANGULO, **kwargs)
-    assert [l["Variante"] for l in linhas] == ["A", "B"]
-    corpo_a = linhas[0]["mensagem"].split("hago webs.", 1)[1].strip()
-    corpo_b = linhas[1]["mensagem"].split("comentarle:", 1)[1].strip()
-    assert corpo_a.lower() == corpo_b.lower()
-
-
-def test_colunas_variante_ao_lado_do_angulo():
-    assert COLUNAS_GERAL.index("Variante") == COLUNAS_GERAL.index("Ângulo") + 1
-    assert COLUNAS_NATA.index("Variante") == COLUNAS_NATA.index("Ângulo") + 1
+def test_colunas_geral_e_nata_nao_tem_mais_variante():
+    assert "Variante" not in COLUNAS_GERAL
+    assert "Variante" not in COLUNAS_NATA

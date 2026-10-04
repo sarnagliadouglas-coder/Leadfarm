@@ -32,13 +32,14 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
@@ -55,13 +56,22 @@ import angulo_mensagem
 import contrato_loader
 import email_utils
 import entrada_estrategia
+import env_loader
 import registro_abordagens
 import whatsapp_utils
 from validador_mensagem import carregar_config as carregar_config_validacao
 
 _DADOS_DIR = Path(__file__).resolve().parent.parent / "_planilhas"
 DIRETORIO_SAIDA_PADRAO = _DADOS_DIR
-ENV_SAIDA_DIR = "COMERCIAL_PLANILHAS_DIR"
+
+# Entrega CONSOLIDADA pro diretor, fora do repo: um único arquivo (nunca
+# versionado por timestamp) que cada rodada ABRE e ACRESCENTA -- nunca recria
+# do zero (decisão do diretor, 01/10/2026). Só duas abas (Geral, Nata); sem
+# "Como usar". Lida só de COMERCIAL_PLANILHAS_DIR (comercial/.env ou env real);
+# ausente = cópia pulada, a rodada nunca falha por causa dela -- mesmo padrão
+# de QUALIFICADOR_SAIDA_HUMANA_DIR em qualificador/prospeccao_ia/saida_humana.py.
+ENV_CONSOLIDADA_DIR = "COMERCIAL_PLANILHAS_DIR"
+NOME_PLANILHA_CONSOLIDADA = "planilha_envio_consolidada.xlsx"
 
 _RE_TIMESTAMP = re.compile(r"(\d{8}-\d{6})")
 _RE_PROFISSIONAL = re.compile(r"^\s*(?:dr\.?|dra\.?|doctor|doctora)\b", re.IGNORECASE)
@@ -101,12 +111,12 @@ COLUNAS_DIRETOR = (
 COLUNAS_GERAL = (
     "pista", "motivo", "nome", "cidade", "telefone", "WhatsApp", "email", "Abrir e-mail", "Canal",
     "instagram", "site", "classe_site", "avaliacoes", "nota", "google_maps_url",
-    "Ângulo", "Variante", "Mensagem sugerida", "Profissional detectado", "Captura",
+    "Ângulo", "Mensagem sugerida", "Profissional detectado", "Captura",
 ) + COLUNAS_DIRETOR + ("Aviso", "Contexto para IA", "place_id")
 
 COLUNAS_NATA = (
     "pista", "nome", "telefone", "WhatsApp", "email", "Abrir e-mail", "Canal",
-    "problema vendável", "Ângulo", "Variante", "mensagem", "Status",
+    "problema vendável", "Ângulo", "mensagem", "Status",
     "conferir_antes_de_enviar", "Profissional detectado", "Captura",
     "site", "google_maps_url", "texto_site",
 ) + COLUNAS_DIRETOR + ("Aviso", "Contexto para IA", "place_id")
@@ -128,27 +138,11 @@ _COMO_USAR_TEXTO = (
         'troque "Hola, buenas" por "Hola, Dr./Dra. [Apellido]".',
     ),
     (
-        "Teste A/B da abertura",
-        'Coluna "Variante": A = abertura atual (serviço primeiro); B = abertura nova (motivo do contato '
-        "primeiro). O corpo da mensagem é o MESMO nas duas -- só a abertura muda. Envie a variante que "
-        "está na linha, sem trocar; A e B já vêm alternadas dentro de cada ângulo e canal. Não mude o "
-        "texto dos modelos durante o teste. Mensagem editada à mão (\"Enviada como\" = editada por mim) "
-        "fica fora da comparação.",
-    ),
-    (
-        "Comparar A e B",
-        "Compare A com B dentro do mesmo ângulo e canal, nunca misturando. Métrica principal: respostas / "
-        "mensagens enviadas. Depois: respostas positivas / enviadas; positivas / respostas; pedidos de "
-        "preço / enviadas. Com 40 a 50 envios o resultado é um SINAL, não prova: diga \"neste lote, B "
-        "teve mais respostas\", \"não houve diferença neste lote\" ou \"amostra insuficiente\" -- "
-        "nunca \"B é comprovadamente melhor\".",
-    ),
-    (
         "Classificar a resposta",
         "resposta positiva: \"Sí, envíamelo\", \"¿Cuánto cobras?\", \"Sí, cuéntame\", \"Me interesa\", "
         "\"¿Qué cambiarías?\". resposta neutra: \"¿Quién eres?\" (útil, mas não positiva). resposta "
         "negativa: \"No me interesa\", \"No necesito nada\". \"No contactar\" = pediu para não "
-        "contatar. Nenhuma resposta = sem resposta. Decida a classificação ANTES de olhar a variante.",
+        "contatar. Nenhuma resposta = sem resposta.",
     ),
 )
 
@@ -166,6 +160,17 @@ class PlaceIdAusenteError(Exception):
     planilha incompleta em silêncio."""
 
 
+class LinkInconsistenteError(Exception):
+    """Uma ou mais linhas têm o hyperlink (destino do clique) de WhatsApp ou
+    e-mail desalinhado dos dados da própria linha -- defeito real, achado
+    01/10/2026: `ws.delete_rows()` (usado numa limpeza manual da planilha
+    consolidada) desloca o TEXTO das células mas não realinha o objeto
+    `hyperlink` do openpyxl, que fica apontando pra posição anterior. Como o
+    operador clica direto no link (WhatsApp/e-mail abre com a mensagem
+    pronta), um desalinhamento manda a mensagem pra pessoa errada -- a
+    planilha inteira falha em vez de sair com links errados em silêncio."""
+
+
 def _validar_place_ids(nome_aba: str, linhas: list) -> None:
     faltando = [i for i, linha in enumerate(linhas, start=2) if not linha.get("place_id")]
     if faltando:
@@ -175,12 +180,95 @@ def _validar_place_ids(nome_aba: str, linhas: list) -> None:
         )
 
 
-def diretorio_saida_padrao() -> Path:
-    """`COMERCIAL_PLANILHAS_DIR` (env) vence; senão `comercial/_planilhas/`."""
-    import os
+_RE_SO_DIGITOS = re.compile(r"\D")
 
-    valor = (os.environ.get(ENV_SAIDA_DIR) or "").strip()
-    return Path(valor) if valor else DIRETORIO_SAIDA_PADRAO
+# (coluna do link, coluna do dado que o link tem que refletir)
+_PARES_LINK_DADO = (("WhatsApp", "telefone"), ("Abrir e-mail", "email"))
+
+
+def _verificar_links_aba(nome_aba: str, ws, colunas) -> list:
+    """Confere, linha a linha, que o hyperlink (destino do clique) de
+    WhatsApp/e-mail bate com o telefone/email DA MESMA LINHA, e que o texto
+    visível da célula é igual ao hyperlink -- ver `LinkInconsistenteError`
+    pro defeito real que motivou esta checagem. Devolve uma lista de
+    descrições de problema (vazia = nada errado)."""
+    cab = list(colunas)
+    if "WhatsApp" not in cab and "Abrir e-mail" not in cab:
+        return []
+    idx_tel = cab.index("telefone") + 1 if "telefone" in cab else None
+    idx_email = cab.index("email") + 1 if "email" in cab else None
+    problemas = []
+    for r in range(2, ws.max_row + 1):
+        for col_link, col_dado in _PARES_LINK_DADO:
+            if col_link not in cab:
+                continue
+            idx_link = cab.index(col_link) + 1
+            cel = ws.cell(r, idx_link)
+            alvo = cel.hyperlink.target if cel.hyperlink else None
+            if alvo is None:
+                continue
+            if cel.value != alvo:
+                problemas.append(
+                    f'Aba "{nome_aba}", linha {r}: texto de "{col_link}" difere do link '
+                    f"(texto={cel.value!r}, link={alvo!r})."
+                )
+            if col_link == "WhatsApp" and idx_tel:
+                tel = ws.cell(r, idx_tel).value
+                if tel and _RE_SO_DIGITOS.sub("", str(tel)) not in alvo:
+                    problemas.append(
+                        f'Aba "{nome_aba}", linha {r}: link de WhatsApp não corresponde ao '
+                        f"telefone da linha (telefone={tel!r}, link={alvo!r})."
+                    )
+                elif not tel:
+                    problemas.append(
+                        f'Aba "{nome_aba}", linha {r}: link de WhatsApp preenchido mas a linha '
+                        f"não tem telefone."
+                    )
+            if col_link == "Abrir e-mail" and idx_email:
+                email = ws.cell(r, idx_email).value
+                if email and email not in alvo:
+                    problemas.append(
+                        f'Aba "{nome_aba}", linha {r}: link de e-mail não corresponde ao email '
+                        f"da linha (email={email!r}, link={alvo[:60]!r})."
+                    )
+                elif not email:
+                    problemas.append(
+                        f'Aba "{nome_aba}", linha {r}: link de e-mail preenchido mas a linha não '
+                        f"tem email."
+                    )
+    return problemas
+
+
+def verificar_consistencia_links(caminho) -> dict:
+    """Carrega um `.xlsx` já gravado e roda `_verificar_links_aba` em toda aba
+    com coluna "WhatsApp" ou "Abrir e-mail". Devolve `{nome_aba: [problemas]}`
+    (listas vazias = aba limpa). Só leitura -- não corrige nada; use pra
+    conferir um arquivo já existente (comando `--verificar`, abaixo)."""
+    wb = load_workbook(caminho)
+    resultado = {}
+    for nome_aba in wb.sheetnames:
+        ws = wb[nome_aba]
+        cab = [c.value for c in ws[1]] if ws.max_row >= 1 else []
+        resultado[nome_aba] = _verificar_links_aba(nome_aba, ws, cab)
+    return resultado
+
+
+def diretorio_saida_padrao() -> Path:
+    """Entrega INTERNA (do programa, uma planilha nova por rodada): sempre
+    `comercial/_planilhas/`. `COMERCIAL_PLANILHAS_DIR` não afeta mais este
+    destino -- essa env agora é só da entrega CONSOLIDADA (ver
+    `diretorio_consolidada`). Override explícito continua via `--saida-dir`."""
+    return DIRETORIO_SAIDA_PADRAO
+
+
+def diretorio_consolidada() -> Optional[Path]:
+    """Pasta da entrega CONSOLIDADA (fora do repo), lida de
+    `COMERCIAL_PLANILHAS_DIR` (`comercial/.env` ou env real). `None` se não
+    configurada -- a atualização da consolidada é pulada nesse caso, sem
+    falhar a rodada."""
+    env_loader.carregar_env()
+    valor = (os.environ.get(ENV_CONSOLIDADA_DIR) or "").strip()
+    return Path(valor) if valor else None
 
 
 # --- Localização das fontes -----------------------------------------------
@@ -324,7 +412,7 @@ def montar_contexto_ia_geral(linha: dict) -> str:
 
 
 def _linha_geral(
-    lead: dict, *, aberturas, distribuidor, config_validacao, assuntos_email, mensagens_angulo, diretorio_capturas,
+    lead: dict, *, apresentacao, config_validacao, assuntos_email, mensagens_angulo, diretorio_capturas,
 ) -> dict:
     telefone = lead.get("telefone")
     email = lead.get("email")
@@ -340,11 +428,9 @@ def _linha_geral(
 
     angulo = angulo_mensagem.escolher_angulo_direta(lead)
     linha["Ângulo"] = angulo
-    linha["Variante"] = ""
     if angulo != angulo_mensagem.SEM_ANGULO:
-        variante = distribuidor.proxima(angulo, canal)
         mensagem, entrada_derivada = angulo_mensagem.montar_mensagem_direta(
-            angulo, lead, apresentacao=aberturas[variante]["texto"], mensagens=mensagens_angulo,
+            angulo, lead, apresentacao=apresentacao, mensagens=mensagens_angulo,
         )
         resultado_validacao = angulo_mensagem.validar_mensagem_angulo(
             mensagem, angulo, entrada_derivada, nome_negocio=lead.get("nome"), config_validacao=config_validacao,
@@ -354,8 +440,6 @@ def _linha_geral(
             linha["Aviso"] = "; ".join(resultado_validacao.motivos)
         else:
             linha["Mensagem sugerida"] = mensagem
-            linha["Variante"] = variante
-            distribuidor.confirmar(angulo, canal)
             if canal == "email":
                 linha["Abrir e-mail"] = email_utils.link_mailto(email, assuntos_email["direta"], mensagem)
 
@@ -374,11 +458,8 @@ def _linha_geral(
     return linha
 
 
-def montar_linhas_geral(leads_csv: list, distribuidor=None, **kwargs) -> list:
-    """Um `DistribuidorVariante` por aba: A/B alternam dentro de cada
-    (ângulo, canal) da aba Geral, na ordem das linhas."""
-    distribuidor = distribuidor or angulo_mensagem.DistribuidorVariante()
-    return [_linha_geral(lead, distribuidor=distribuidor, **kwargs) for lead in leads_csv]
+def montar_linhas_geral(leads_csv: list, **kwargs) -> list:
+    return [_linha_geral(lead, **kwargs) for lead in leads_csv]
 
 
 # --- Linhas da aba Nata (nata + candidatos_triagem) -------------------------
@@ -442,7 +523,7 @@ def montar_contexto_ia_nata(lead, angulo: str, mensagem: Optional[str]) -> str:
 
 def _linha_nata(
     lead, pista: str, leads_do_lote: list, *,
-    aberturas, distribuidor, config_validacao, assuntos_email, regras_angulo, mensagens_angulo, diretorio_capturas,
+    apresentacao, config_validacao, assuntos_email, regras_angulo, mensagens_angulo, diretorio_capturas,
 ) -> dict:
     telefone = _campo_evidencia_ou_vazio(lead, "contato", "telefone")
     email = _campo_evidencia_ou_vazio(lead, "contato", "email")
@@ -460,7 +541,6 @@ def _linha_nata(
         "Canal": canal,
         "problema vendável": _resumo_problema_vendavel(lead),
         "Ângulo": "",
-        "Variante": "",
         "mensagem": "",
         "Status": "",
         "conferir_antes_de_enviar": "sim" if _tem_problema_fora_do_ar(lead) else "não",
@@ -480,9 +560,8 @@ def _linha_nata(
     if angulo == angulo_mensagem.SEM_ANGULO:
         linha["Status"] = STATUS_SEM_MENSAGEM
     else:
-        variante = distribuidor.proxima(angulo, canal)
         mensagem, entrada_derivada = angulo_mensagem.montar_mensagem_nata(
-            angulo, lead, leads_do_lote, apresentacao=aberturas[variante]["texto"], regras=regras_angulo,
+            angulo, lead, leads_do_lote, apresentacao=apresentacao, regras=regras_angulo,
             mensagens=mensagens_angulo,
         )
         resultado_validacao = angulo_mensagem.validar_mensagem_angulo(
@@ -497,8 +576,6 @@ def _linha_nata(
             linha["Status"] = STATUS_SEM_MENSAGEM
         else:
             linha["mensagem"] = mensagem
-            linha["Variante"] = variante
-            distribuidor.confirmar(angulo, canal)
             mensagem_final = mensagem
             if canal == "email":
                 linha["Abrir e-mail"] = email_utils.link_mailto(email, assuntos_email["nata"], mensagem)
@@ -518,16 +595,15 @@ def _linha_nata(
     return linha
 
 
-def montar_linhas_nata(nata: list, candidatos_triagem: list, descartados: list, distribuidor=None, **kwargs) -> list:
+def montar_linhas_nata(nata: list, candidatos_triagem: list, descartados: list, **kwargs) -> list:
     """`nata` e `candidatos_triagem` viram linhas (coluna `pista` distingue
     as duas); `descartados` entra só como pool de concorrentes do ângulo
     `reputacao` (`angulo_mensagem.escolher_angulo_nata`), nunca vira linha
     própria."""
     leads_do_lote = list(nata) + list(candidatos_triagem) + list(descartados)
-    distribuidor = distribuidor or angulo_mensagem.DistribuidorVariante()
-    linhas = [_linha_nata(lead, "nata", leads_do_lote, distribuidor=distribuidor, **kwargs) for lead in nata]
+    linhas = [_linha_nata(lead, "nata", leads_do_lote, **kwargs) for lead in nata]
     linhas += [
-        _linha_nata(lead, "candidatos_triagem", leads_do_lote, distribuidor=distribuidor, **kwargs)
+        _linha_nata(lead, "candidatos_triagem", leads_do_lote, **kwargs)
         for lead in candidatos_triagem
     ]
     return linhas
@@ -565,15 +641,32 @@ def _sem_caracteres_ilegais(valor):
     return valor
 
 
-def _escrever_aba(ws, colunas, linhas, *, colunas_link=(), colunas_wrap=(), opcoes_funil=None):
-    ws.append([_sem_caracteres_ilegais(c) for c in colunas])
-    for cel in ws[1]:
-        cel.font = Font(bold=True)
-    ws.freeze_panes = "A2"
+def _acrescentar_linhas(ws, colunas, linhas, *, cabecalho: bool):
+    """Só grava: cabeçalho (quando `cabecalho=True`) + uma linha por item de
+    `linhas`. Sem estilo -- isso é `_restilizar_aba`, separado pra poder
+    reaplicar o estilo depois de um `ws.append` feito em outra rodada (caso
+    da planilha consolidada, que é reaberta e acrescentada, nunca recriada).
+
+    `cabecalho` é decidido pelo CHAMADOR (aba nova ou não) em vez de sondado
+    aqui: ler `ws.cell(1, 1).value` numa aba vazia já materializa a célula no
+    openpyxl e faz o próximo `ws.append` pular pra linha 2 -- defeito real,
+    achado nesta tarefa (01/10/2026), que deixava a aba com uma linha 1 em
+    branco e o cabeçalho na linha 2."""
+    if cabecalho:
+        ws.append([_sem_caracteres_ilegais(c) for c in colunas])
+        for cel in ws[1]:
+            cel.font = Font(bold=True)
+        ws.freeze_panes = "A2"
 
     for linha in linhas:
         ws.append([_sem_caracteres_ilegais(linha.get(c, "")) for c in colunas])
 
+
+def _restilizar_aba(ws, colunas, *, colunas_link=(), colunas_wrap=(), opcoes_funil=None):
+    """(Re)aplica filtro, validação de funil, links, quebra de linha, largura
+    de coluna e a coluna `place_id` oculta sobre o estado ATUAL da aba (todas
+    as linhas, não só as que acabaram de entrar) -- pode ser chamado tanto
+    numa aba recém-criada quanto numa reaberta e acrescentada."""
     ultima_linha = ws.max_row
     if ultima_linha >= 1:
         ws.auto_filter.ref = f"A1:{get_column_letter(len(colunas))}{max(ultima_linha, 1)}"
@@ -596,12 +689,116 @@ def _escrever_aba(ws, colunas, linhas, *, colunas_link=(), colunas_wrap=(), opco
 
     for i, nome_col in enumerate(colunas, start=1):
         maior = len(nome_col)
-        for linha in linhas:
-            maior = max(maior, len(str(linha.get(nome_col, ""))))
+        for r in range(2, ultima_linha + 1):
+            maior = max(maior, len(str(ws.cell(r, i).value or "")))
         ws.column_dimensions[get_column_letter(i)].width = min(max(maior + 2, 10), 60)
 
     if "place_id" in colunas:
         ws.column_dimensions[get_column_letter(colunas.index("place_id") + 1)].hidden = True
+
+
+def _escrever_aba(ws, colunas, linhas, *, colunas_link=(), colunas_wrap=(), opcoes_funil=None):
+    _acrescentar_linhas(ws, colunas, linhas, cabecalho=True)
+    _restilizar_aba(ws, colunas, colunas_link=colunas_link, colunas_wrap=colunas_wrap, opcoes_funil=opcoes_funil)
+
+
+def _place_ids_na_aba(ws, colunas) -> set:
+    """`place_id`s já presentes numa aba (linhas de dados, sem o cabeçalho).
+    Usado pra não duplicar lead na planilha consolidada entre rodadas."""
+    if "place_id" not in colunas or ws.max_row < 2:
+        return set()
+    idx = colunas.index("place_id") + 1
+    return {
+        str(ws.cell(r, idx).value) for r in range(2, ws.max_row + 1) if ws.cell(r, idx).value
+    }
+
+
+def atualizar_planilha_consolidada(
+    *,
+    linhas_geral: list,
+    linhas_nata: list,
+    opcoes_funil: Optional[dict] = None,
+    diretorio: Optional[Path] = None,
+) -> dict:
+    """Mantém a entrega CONSOLIDADA do diretor: um único `.xlsx` fora do
+    repo, com só as abas Geral e Nata (sem "Como usar"), que cada rodada
+    ABRE e ACRESCENTA -- nunca recria nem sobrescreve uma rodada anterior
+    (decisão do diretor, 01/10/2026). Dedup por `place_id`: lead já presente
+    na aba não entra de novo.
+
+    `diretorio` omitido = lê `COMERCIAL_PLANILHAS_DIR`. Pasta não configurada
+    = cópia pulada, a rodada NUNCA falha por causa disto (mesmo espírito de
+    `saida_humana.copiar_conveniencia` do QUALIFICADOR) -- devolve
+    `{"pulado": True, "motivo": ...}`."""
+    destino_dir = diretorio if diretorio is not None else diretorio_consolidada()
+    if destino_dir is None:
+        return {"pulado": True, "motivo": f"{ENV_CONSOLIDADA_DIR} não definida -- consolidada pulada."}
+
+    caminho = Path(destino_dir) / NOME_PLANILHA_CONSOLIDADA
+    try:
+        destino_dir = Path(destino_dir)
+        destino_dir.mkdir(parents=True, exist_ok=True)
+
+        if caminho.exists():
+            wb = load_workbook(caminho)
+        else:
+            # Workbook() já vem com uma aba padrão ("Sheet"); removê-la ANTES
+            # de checar sheetnames -- renomear essa aba padrão pra "Geral"
+            # (em vez de removê-la) faria "Geral" já constar em sheetnames
+            # antes da checagem abaixo, e o cabeçalho seria pulado também
+            # numa planilha nova (defeito real, achado nesta tarefa).
+            wb = Workbook()
+            wb.remove(wb.active)
+
+        geral_nova = "Geral" not in wb.sheetnames
+        ws_geral = wb.create_sheet("Geral") if geral_nova else wb["Geral"]
+        nata_nova = "Nata" not in wb.sheetnames
+        ws_nata = wb.create_sheet("Nata") if nata_nova else wb["Nata"]
+
+        ja_geral = _place_ids_na_aba(ws_geral, COLUNAS_GERAL)
+        ja_nata = _place_ids_na_aba(ws_nata, COLUNAS_NATA)
+        novas_geral = [l for l in linhas_geral if str(l.get("place_id")) not in ja_geral]
+        novas_nata = [l for l in linhas_nata if str(l.get("place_id")) not in ja_nata]
+
+        _acrescentar_linhas(ws_geral, COLUNAS_GERAL, novas_geral, cabecalho=geral_nova)
+        _acrescentar_linhas(ws_nata, COLUNAS_NATA, novas_nata, cabecalho=nata_nova)
+        _restilizar_aba(
+            ws_geral, COLUNAS_GERAL,
+            colunas_link=("WhatsApp", "Abrir e-mail", "Captura"),
+            colunas_wrap=("Mensagem sugerida", "Contexto para IA"),
+            opcoes_funil=opcoes_funil,
+        )
+        _restilizar_aba(
+            ws_nata, COLUNAS_NATA,
+            colunas_link=("WhatsApp", "Abrir e-mail", "Captura"),
+            colunas_wrap=("mensagem", "texto_site", "Contexto para IA"),
+            opcoes_funil=opcoes_funil,
+        )
+
+        # Checagem antes de salvar -- a consolidada é reaberta e acrescentada
+        # rodada após rodada, então um desalinhamento de hyperlink (ex.:
+        # `delete_rows` numa limpeza manual) que passasse batido aqui
+        # contaminaria toda rodada futura. Não captura `LinkInconsistenteError`:
+        # propaga pra fora, SEM salvar -- o arquivo em disco fica como estava.
+        problemas = _verificar_links_aba("Geral", ws_geral, COLUNAS_GERAL) + _verificar_links_aba(
+            "Nata", ws_nata, COLUNAS_NATA
+        )
+        if problemas:
+            raise LinkInconsistenteError(
+                f"{len(problemas)} link(s) desalinhado(s) na planilha consolidada -- nada foi "
+                f"salvo, o arquivo em {caminho} continua como estava:\n" + "\n".join(problemas)
+            )
+
+        wb.save(caminho)
+    except OSError as e:
+        return {"pulado": True, "motivo": f"consolidada falhou ({e}) -- a rodada segue normalmente."}
+
+    return {
+        "pulado": False,
+        "caminho": caminho,
+        "novos_geral": len(novas_geral),
+        "novos_nata": len(novas_nata),
+    }
 
 
 def _caminho_planilha(saida_dir: Path, agora: datetime) -> Path:
@@ -615,25 +812,32 @@ def gerar_planilha(
     caminho_registro: Optional[Path] = None,
     saida_dir: Optional[Path] = None,
     agora: Optional[datetime] = None,
-    aberturas: Optional[dict] = None,
+    apresentacao: Optional[str] = None,
     config_validacao: Optional[dict] = None,
     assuntos_email: Optional[dict] = None,
     opcoes_funil: Optional[dict] = None,
     regras_angulo: Optional[dict] = None,
     mensagens_angulo: Optional[dict] = None,
     diretorio_capturas: Optional[Path] = None,
+    consolidada_dir: Optional[Path] = None,
 ) -> dict:
-    """Gera `planilha_envio_<timestamp>.xlsx` com as abas Geral, Nata e
-    "Como usar". Nunca sobrescreve (`PlanilhaJaExisteError`). Exclui, das
-    abas Geral e Nata, quem já está no registro de abordados. Devolve
-    `{"caminho", "excluidos_geral", "excluidos_nata"}`."""
+    """Gera `planilha_envio_<timestamp>.xlsx` (entrega interna, abas Geral,
+    Nata e "Como usar") e atualiza a entrega CONSOLIDADA (fora do repo, só
+    Geral e Nata, acrescentada -- nunca recriada). Nunca sobrescreve a
+    interna (`PlanilhaJaExisteError`). Exclui, das duas, quem já está no
+    registro de abordados. Devolve
+    `{"caminho", "excluidos_geral", "excluidos_nata", "consolidada"}`.
+
+    `consolidada_dir` omitido = lê `COMERCIAL_PLANILHAS_DIR` (ver
+    `diretorio_consolidada`); passe um diretório explícito em teste pra não
+    tocar a pasta real do diretor."""
     saida_dir = Path(saida_dir) if saida_dir else diretorio_saida_padrao()
     agora = agora or datetime.now(timezone.utc)
     caminho = _caminho_planilha(saida_dir, agora)
     if caminho.exists():
         raise PlanilhaJaExisteError(f"{caminho} já existe — nunca sobrescrever uma planilha anterior.")
 
-    aberturas = aberturas if aberturas is not None else angulo_mensagem.carregar_aberturas()
+    apresentacao = apresentacao if apresentacao is not None else angulo_mensagem.carregar_apresentacao()
     config_validacao = config_validacao or carregar_config_validacao()
     assuntos_email = assuntos_email if assuntos_email is not None else email_utils.carregar_assuntos_email()
     opcoes_funil = opcoes_funil if opcoes_funil is not None else registro_abordagens.carregar_opcoes_funil()
@@ -655,16 +859,13 @@ def gerar_planilha(
     candidatos_incluidos = [l for l in lote.candidatos_triagem if l["place_id"] not in ja_abordados]
 
     kwargs_comuns = dict(
-        aberturas=aberturas, config_validacao=config_validacao, assuntos_email=assuntos_email,
+        apresentacao=apresentacao, config_validacao=config_validacao, assuntos_email=assuntos_email,
         mensagens_angulo=mensagens_angulo, diretorio_capturas=diretorio_capturas,
     )
 
-    # Um distribuidor para as duas abas: o equilíbrio A/B é do pacote inteiro
-    # (decisão do diretor, 28/09/2026); os estratos (ângulo, canal) das abas não se misturam.
-    distribuidor = angulo_mensagem.DistribuidorVariante()
-    linhas_geral = montar_linhas_geral(leads_csv, distribuidor=distribuidor, **kwargs_comuns)
+    linhas_geral = montar_linhas_geral(leads_csv, **kwargs_comuns)
     linhas_nata = montar_linhas_nata(
-        nata_incluida, candidatos_incluidos, lote.descartados, regras_angulo=regras_angulo, distribuidor=distribuidor,
+        nata_incluida, candidatos_incluidos, lote.descartados, regras_angulo=regras_angulo,
         **kwargs_comuns,
     )
 
@@ -689,13 +890,28 @@ def gerar_planilha(
     )
     _escrever_aba_como_usar(wb)
 
+    problemas = _verificar_links_aba("Geral", ws_geral, COLUNAS_GERAL) + _verificar_links_aba(
+        "Nata", ws_nata, COLUNAS_NATA
+    )
+    if problemas:
+        raise LinkInconsistenteError(
+            f"{len(problemas)} link(s) desalinhado(s) -- nenhuma planilha foi gerada:\n"
+            + "\n".join(problemas)
+        )
+
     saida_dir.mkdir(parents=True, exist_ok=True)
     wb.save(caminho)
+
+    consolidada = atualizar_planilha_consolidada(
+        linhas_geral=linhas_geral, linhas_nata=linhas_nata, opcoes_funil=opcoes_funil,
+        diretorio=consolidada_dir,
+    )
 
     return {
         "caminho": caminho,
         "excluidos_geral": len(excluidos_geral),
         "excluidos_nata": len(nata_excluida) + len(candidatos_excluidos),
+        "consolidada": consolidada,
     }
 
 
@@ -705,17 +921,41 @@ def main(argv: Optional[list] = None) -> int:
     )
     ap.add_argument(
         "--saida-dir", type=Path, default=None,
-        help="Diretório de saída (default: COMERCIAL_PLANILHAS_DIR ou comercial/_planilhas/).",
+        help="Diretório de saída interna (default: comercial/_planilhas/).",
+    )
+    ap.add_argument(
+        "--verificar", type=Path, default=None, metavar="ARQUIVO",
+        help="Só confere os hyperlinks de um .xlsx já existente (WhatsApp/e-mail batendo com "
+        "telefone/email da própria linha); não gera planilha nova. Exit 0 = tudo certo, 1 = "
+        "achou desalinhamento.",
     )
     args = ap.parse_args(argv)
+
+    if args.verificar:
+        resultado = verificar_consistencia_links(args.verificar)
+        total = sum(len(v) for v in resultado.values())
+        for nome_aba, problemas in resultado.items():
+            print(f'Aba "{nome_aba}": {len(problemas)} problema(s).')
+            for p in problemas:
+                print(f"  {p}")
+        print("OK, nenhum link desalinhado." if total == 0 else f"TOTAL: {total} problema(s).")
+        return 0 if total == 0 else 1
 
     resultado = gerar_planilha(saida_dir=args.saida_dir)
 
     print(
-        f"OK: planilha gerada em {resultado['caminho']} "
+        f"OK: planilha interna gerada em {resultado['caminho']} "
         f"({resultado['excluidos_geral']} excluído(s) na Geral, "
         f"{resultado['excluidos_nata']} excluído(s) na Nata -- já abordados)."
     )
+    consolidada = resultado["consolidada"]
+    if consolidada.get("pulado"):
+        print(f"[Consolidada] {consolidada['motivo']}")
+    else:
+        print(
+            f"[Consolidada] {consolidada['caminho']}: "
+            f"+{consolidada['novos_geral']} novo(s) na Geral, +{consolidada['novos_nata']} novo(s) na Nata."
+        )
     return 0
 
 
