@@ -7,6 +7,7 @@ import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
+import campanha as campanha_mod
 import contrato
 import csv_contrato
 import env_loader
@@ -14,6 +15,7 @@ import gbp_diagnostic
 import lead_qualification
 import output_json
 import psi_client
+import rede_multiunidade
 import saida_humana
 import site_classificacao
 import site_renderizado
@@ -132,14 +134,121 @@ def _acrescentar_novos(caminho, leads, status, conhecidas_globais):
 
 def _acrescentar_reprovados(leads, conhecidas_globais):
     """Igual ao _acrescentar_novos, mas extrai o motivo (anexado pelo coletor em cada lead)
-    pro nível do registro — nunca reprova silenciosamente."""
+    pro nível do registro — nunca reprova silenciosamente. `rejection_detail` (categoria que
+    causou o corte, grupo de rede...) também sobe para o registro quando existe."""
     existentes = carregar_json(PATH_REPROVADOS)
     novos = [l for l in leads if chave_dedup(l) not in conhecidas_globais]
     for lead in novos:
         motivo = lead.pop("rejection_reason", "unknown")
-        existentes.append({"dados_empresa": lead, "status": "rejected", "rejection_reason": motivo})
+        registro = {"dados_empresa": lead, "status": "rejected", "rejection_reason": motivo}
+        detalhe = lead.pop("rejection_detail", None)
+        if detalhe is not None:
+            registro["rejection_detail"] = detalhe
+        existentes.append(registro)
     salvar_json(PATH_REPROVADOS, existentes)
     return len(novos)
+
+
+def _remover_identico(lista, item):
+    """Remove pelo OBJETO (identidade), nunca por igualdade -- dois dicts iguais seriam o
+    mesmo para list.remove."""
+    for i, existente in enumerate(lista):
+        if existente is item:
+            del lista[i]
+            return
+    raise ValueError("item não está na lista")
+
+
+# Arquivos do pool com leads ATIVOS (não reprovados) -- o filtro de rede pode tirar um
+# registro daqui e levá-lo para leads_reprovados.json.
+def _arquivos_pool_ativo():
+    return [PATH_COLETADOS, PATH_COM_SITE, PATH_QUALIFICADOS]
+
+
+def _aplicar_filtro_rede(wave1, wave2, reprovados, config_rede, conhecidas_globais):
+    """Filtro de redes / multiunidade (rede_multiunidade.py) sobre o POOL inteiro + os leads
+    novos deste import. Só CALCULA e altera listas/registros em memória; devolve o que
+    main.importar_csv precisa gravar. Nada é escrito aqui.
+
+    - lead novo ativo com marca da lista, ou em grupo >= limiar: vai para `reprovados`
+      (motivo rede_ou_multiunidade + rejection_detail);
+    - registro JÁ no pool ativo em grupo >= limiar: sai do arquivo dele e vai para
+      leads_reprovados.json (o registro inteiro é preservado, com status_anterior);
+    - grupo menor que o limiar (2+): aviso `possivel_mesmo_negocio` nos ativos (novos e do
+      pool); lead novo ativo sem par recebe [] (checado, nenhum par).
+    Registros já reprovados contam para o tamanho do grupo, mas mantêm o motivo original."""
+    limiar = config_rede["limiar_rede"]
+    marcas = config_rede["marcas"]
+
+    def _novo(lead):
+        return chave_dedup(lead) not in conhecidas_globais
+
+    # 1. Marca (só leads novos ativos).
+    por_marca = []
+    for lista in (wave1, wave2):
+        for lead in list(lista):
+            if not _novo(lead):
+                continue
+            marca = rede_multiunidade.marca_no_nome(lead, marcas)
+            if marca:
+                lead["rejection_reason"] = rede_multiunidade.MOTIVO
+                lead["rejection_detail"] = {"por": rede_multiunidade.POR_MARCA, "chave": marca, "tamanho_grupo": None}
+                _remover_identico(lista, lead)
+                por_marca.append(lead)
+    reprovados.extend(por_marca)
+
+    # 2. Fichas: pool inteiro (uma por chave) + leads novos deste import.
+    pool = {caminho: carregar_json(caminho) for caminho in _arquivos_pool_ativo() + [PATH_REPROVADOS]}
+    fichas, origem, vistas = [], [], set()
+    for caminho, registros in pool.items():
+        for registro in registros:
+            emp = registro.get("dados_empresa")
+            if not emp or chave_dedup(emp) in vistas:
+                continue
+            vistas.add(chave_dedup(emp))
+            ativo = caminho != PATH_REPROVADOS and registro.get("status") != "rejected"
+            fichas.append(emp)
+            origem.append(("pool", caminho, registro, ativo))
+    for lista, ativo in ((wave1, True), (wave2, True), (reprovados, False)):
+        for lead in lista:
+            if _novo(lead) and chave_dedup(lead) not in vistas:
+                vistas.add(chave_dedup(lead))
+                fichas.append(lead)
+                origem.append(("novo", lista, lead, ativo))
+
+    descartes, avisos = rede_multiunidade.agrupar(fichas, limiar)
+
+    # 3. Aplicação em memória.
+    pool_movidos, avisos_marcados, pool_alterado = [], 0, set()
+    for i, (tipo, onde, item, ativo) in enumerate(origem):
+        if not ativo:
+            continue
+        if i in descartes:
+            if tipo == "novo":
+                item["rejection_reason"] = rede_multiunidade.MOTIVO
+                item["rejection_detail"] = descartes[i]
+                _remover_identico(onde, item)
+                reprovados.append(item)
+            else:
+                _remover_identico(pool[onde], item)
+                pool_movidos.append({**item, "status": "rejected", "status_anterior": item.get("status"),
+                                     "rejection_reason": rede_multiunidade.MOTIVO,
+                                     "rejection_detail": descartes[i]})
+                pool_alterado.add(onde)
+            continue
+        if i in avisos:
+            fichas[i]["possivel_mesmo_negocio"] = avisos[i]
+            avisos_marcados += 1
+            if tipo == "pool":
+                pool_alterado.add(onde)
+        elif tipo == "novo":
+            fichas[i]["possivel_mesmo_negocio"] = []
+
+    pool[PATH_REPROVADOS].extend(pool_movidos)
+    if pool_movidos:
+        pool_alterado.add(PATH_REPROVADOS)
+    return {"pool": pool, "pool_alterado": pool_alterado, "pool_movidos": len(pool_movidos),
+            "por_marca": len(por_marca), "avisos": avisos_marcados}
 
 
 def importar_csv(caminho_csv):
@@ -148,9 +257,15 @@ def importar_csv(caminho_csv):
         print(f"[Erro] Arquivo não encontrado: {caminho_csv}")
         return
 
+    # Falha alta ANTES de ler o CSV ou gravar qualquer coisa: sem campanha ativa válida (ou
+    # sem a config de redes), o import não roda. Propaga, como ContratoCsvInvalido.
+    campanha = campanha_mod.carregar_campanha()
+    config_rede = rede_multiunidade.carregar_config()
+    print(f"[Import] Campanha ativa: {campanha['id']} ({campanha['nicho']}, {campanha['cidade']}).")
+
     coletor = AgentColetor()
     try:
-        wave1, reprovados, wave2, custo, recon = coletor.coletar_leads_de_csv(caminho_csv)
+        wave1, reprovados, wave2, custo, recon = coletor.coletar_leads_de_csv(caminho_csv, campanha=campanha)
     except csv_contrato.ContratoCsvInvalido:
         # Falha alta: contrato EXTRATOR -> QUALIFICADOR violado. Não é "este CSV está
         # corrompido", é "pare e conserte o EXTRATOR". Propaga (nada foi gravado).
@@ -160,15 +275,27 @@ def importar_csv(caminho_csv):
         print("[Erro] Nenhum dado foi gravado. Corrija o arquivo e tente novamente.")
         return
 
+    total_coletor = len(wave1) + len(wave2) + len(reprovados)
     conhecidas_globais = _todas_chaves_conhecidas()
+    rede = _aplicar_filtro_rede(wave1, wave2, reprovados, config_rede, conhecidas_globais)
+
+    # Gravação: primeiro o pool alterado pelo filtro de rede, depois os leads novos.
+    for caminho in rede["pool_alterado"]:
+        salvar_json(caminho, rede["pool"][caminho])
+    motivos_novos = {}
+    for lead in reprovados:
+        if chave_dedup(lead) not in conhecidas_globais:
+            motivo = lead.get("rejection_reason", "unknown")
+            motivos_novos[motivo] = motivos_novos.get(motivo, 0) + 1
     n_wave1 = _acrescentar_novos(PATH_COLETADOS, wave1, "eligible", conhecidas_globais)
     n_reprovados = _acrescentar_reprovados(reprovados, conhecidas_globais)
     n_wave2 = _acrescentar_novos(PATH_COM_SITE, wave2, "queued_future", conhecidas_globais)
 
-    salvar_json(PATH_IMPORT_META, {"origem_csv": os.path.basename(caminho_csv), "importado_em": _now_iso()})
+    salvar_json(PATH_IMPORT_META, {"origem_csv": os.path.basename(caminho_csv), "importado_em": _now_iso(),
+                                   "campanha_id": campanha["id"]})
 
     novos = n_wave1 + n_wave2 + n_reprovados
-    dedup_global = (recon["para_onda1"] + recon["para_onda2"] + recon["reprovados_comercial"]) - novos
+    dedup_global = total_coletor - novos
 
     print("==================================================")
     print(f"📥 {n_wave1} lead(s) Onda 1 novo(s) → fila de qualificação ({PATH_COLETADOS})")
@@ -186,9 +313,15 @@ def importar_csv(caminho_csv):
     print(f"  dedup interno (repetidas no mesmo CSV):   {recon['dedup_interno']}")
     print(f"  dedup global (já conhecidas de rodadas anteriores): {dedup_global}")
     print(f"  leads novos nesta rodada:                 {novos}")
-    print(f"      → Onda 1: {n_wave1}   Onda 2: {n_wave2}   reprovados (filtro comercial): {n_reprovados}")
+    print(f"      → Onda 1: {n_wave1}   Onda 2: {n_wave2}   reprovados: {n_reprovados}")
+    for motivo in sorted(motivos_novos):
+        print(f"          reprovados por {motivo}: {motivos_novos[motivo]}")
     print(f"Confere ({recon['sem_nome']}+{recon['dedup_interno']}+{dedup_global}+{novos} = {soma}): "
           f"{'OK' if soma == recon['linhas_csv'] else 'DIVERGE ⚠️'}")
+    print("--- FILTRO DE REDES / MULTIUNIDADE (pool inteiro) ---")
+    print(f"  fichas JÁ no pool movidas para reprovados ({rede_multiunidade.MOTIVO}), fora da conta acima: "
+          f"{rede['pool_movidos']}")
+    print(f"  fichas ativas com aviso possivel_mesmo_negocio: {rede['avisos']}")
     print("==================================================")
 
 

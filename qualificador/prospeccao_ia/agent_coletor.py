@@ -1,8 +1,10 @@
 import csv
+import json
 import os
 import re
 from urllib.parse import urlparse
 
+import campanha as campanha_mod
 import csv_contrato
 import site_classificacao
 import telefone_utils
@@ -27,6 +29,77 @@ CATEGORIA_INVALIDA_RE = re.compile(
     r"no\s*hay\s*rese|nenhuma\s*avalia|no\s*reviews|añadir\s*horario|añadir\s*sitio\s*web",
     re.IGNORECASE,
 )
+
+# Outros marcadores de linha deslocada (04/10/2026, CSV de abogados): glifo de ícone (caractere
+# Unicode de uso privado) ou texto de horário ("Apertura: 9:00 (lun)") no lugar da categoria.
+# Lista em config, não no código. Mesmo mecanismo de recuperação de CATEGORIA_INVALIDA_RE.
+CAMINHO_CONFIG_LINHA_DESLOCADA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "linha_deslocada.json")
+MOTIVO_LINHA_DESLOCADA = "linha_deslocada_irrecuperavel"
+_config_linha_deslocada = {}
+
+
+def _carregar_config_linha_deslocada(caminho=None):
+    """Lida uma vez por caminho. Ausente/inválida levanta (o import não segue com detecção
+    pela metade; main.importar_csv não grava nada)."""
+    caminho = caminho or CAMINHO_CONFIG_LINHA_DESLOCADA
+    if caminho not in _config_linha_deslocada:
+        with open(caminho, "r", encoding="utf-8") as f:
+            config = json.load(f)
+        _config_linha_deslocada[caminho] = {
+            "uso_privado": bool(config.get("categoria_com_caractere_de_uso_privado")),
+            "regex": [re.compile(r, re.IGNORECASE) for r in config.get("marcadores_regex") or []],
+        }
+    return _config_linha_deslocada[caminho]
+
+
+def _tem_caractere_de_uso_privado(texto):
+    return any(0xE000 <= ord(c) <= 0xF8FF or 0xF0000 <= ord(c) <= 0x10FFFD for c in texto)
+
+
+def padrao_de_linha_deslocada(categoria):
+    """Nome do padrão de deslocamento que a 1ª categoria revela, ou None (linha íntegra)."""
+    if not categoria:
+        return None
+    if CATEGORIA_INVALIDA_RE.search(categoria):
+        return "sem_avaliacao"
+    config = _carregar_config_linha_deslocada()
+    if config["uso_privado"] and _tem_caractere_de_uso_privado(categoria):
+        return "caractere_uso_privado"
+    if any(r.search(categoria) for r in config["regex"]):
+        return "marcador_config"
+    return None
+
+
+def _campos_suspeitos_na_linha_deslocada(linha):
+    """Numa linha deslocada, confere se telefone, site, avaliações e nota têm a FORMA certa.
+    Campo vazio é aceito (ausência real); campo preenchido com forma errada indica que outra
+    coluna também deslocou -- e o lead não segue com dado trocado."""
+    suspeitos = []
+    telefone = (linha.get("Phone") or "").strip()
+    if telefone:
+        candidatos = [telefone]
+    else:
+        candidatos = [c.strip() for c in re.split(r"[,;/|\n]+", linha.get("Phones") or "") if c.strip()]
+    for candidato in candidatos:
+        numero = telefone_utils.numero_nacional_espanhol(candidato)
+        if not (numero.isdigit() and len(numero) == 9):
+            suspeitos.append("telefone")
+            break
+    website = (linha.get("Website") or "").strip()
+    if website and site_classificacao._host(website) is None:
+        suspeitos.append("website")
+    avaliacoes = (linha.get("Review Count") or "").strip()
+    if avaliacoes and not avaliacoes.isdigit() and not CATEGORIA_INVALIDA_RE.search(avaliacoes):
+        suspeitos.append("avaliacoes")
+    nota = (linha.get("Average Rating") or "").strip()
+    if nota:
+        try:
+            if not 0 <= float(nota.replace(",", ".")) <= 5:
+                suspeitos.append("nota")
+        except ValueError:
+            suspeitos.append("nota")
+    return suspeitos
+
 
 # Filtro comercial em Python (custo $0): só exclui organizações claramente fora do perfil de
 # cliente (autônomos/profissionais liberais). Não exclui termos genéricos como "clínica" —
@@ -143,11 +216,17 @@ def _classificar_reputacao(nota_google):
 
 
 class AgentColetor:
-    def coletar_leads_de_csv(self, caminho_csv):
+    def coletar_leads_de_csv(self, caminho_csv, campanha=None):
         """Lê o CSV e classifica os leads em Onda 1 (elegível), Onda 2 (fila futura) e
         reprovados. Valida o contrato EXTRATOR -> QUALIFICADOR (sidecar + header) ANTES de
         importar qualquer coisa -- violação de contrato levanta csv_contrato.ContratoCsvInvalido
         e nada é importado.
+
+        `campanha` (dict já validado por campanha.carregar_campanha): cada lead recebe o
+        carimbo `campanha_id`/`campanha_nicho`, e o corte de categoria da campanha roda ANTES
+        dos filtros comerciais e da separação em ondas -- lead fora do perfil nunca chega a
+        nenhuma onda. main.importar_csv sempre passa a campanha; None (uso direto em teste)
+        pula carimbo e corte.
 
         Devolve (wave1, reprovados, wave2, custo, reconciliacao). `reconciliacao` conta o que
         entrou vs. o que sumiu no import (linhas sem Name, dedup interno) -- ver main.importar_csv,
@@ -170,9 +249,28 @@ class AgentColetor:
         leads_dedup = self._deduplicar(validos)
         dedup_interno = len(validos) - len(leads_dedup)
 
-        aprovados, reprovados = self._aplicar_filtros_comerciais(leads_dedup)
-        if reprovados:
-            print(f"[Coletor] {len(reprovados)} lead(s) reprovado(s) pelos filtros comerciais.")
+        # Linha deslocada sem recuperação segura nunca segue com dado trocado (antes de
+        # qualquer outro filtro: a categoria dela não é confiável).
+        leads_dedup, reprovados_deslocada = self._aplicar_filtro_linha_deslocada(leads_dedup)
+        if reprovados_deslocada:
+            print(f"[Coletor] {len(reprovados_deslocada)} lead(s) com linha deslocada irrecuperável.")
+        if campanha is not None:
+            for lead in reprovados_deslocada:
+                lead.update(campanha_mod.carimbo(campanha))
+
+        reprovados_categoria = []
+        if campanha is not None:
+            for lead in leads_dedup:
+                lead.update(campanha_mod.carimbo(campanha))
+            leads_dedup, reprovados_categoria = self._aplicar_filtro_categoria(leads_dedup, campanha)
+            if reprovados_categoria:
+                print(f"[Coletor] {len(reprovados_categoria)} lead(s) fora das categorias da campanha "
+                      f"'{campanha['id']}'.")
+
+        aprovados, reprovados_comercial = self._aplicar_filtros_comerciais(leads_dedup)
+        if reprovados_comercial:
+            print(f"[Coletor] {len(reprovados_comercial)} lead(s) reprovado(s) pelos filtros comerciais.")
+        reprovados = reprovados_deslocada + reprovados_categoria + reprovados_comercial
 
         wave1, wave2 = self._classificar_campanha(aprovados)
         print(f"[Coletor] {len(wave1)} lead(s) Onda 1 (sem site listado na ficha).")
@@ -191,9 +289,43 @@ class AgentColetor:
             "dedup_interno": dedup_interno,
             "para_onda1": len(wave1),
             "para_onda2": len(wave2),
-            "reprovados_comercial": len(reprovados),
+            "reprovados_comercial": len(reprovados_comercial),
+            "reprovados_categoria": len(reprovados_categoria),
+            "reprovados_linha_deslocada": len(reprovados_deslocada),
         }
         return wave1, reprovados, wave2, 0.0, reconciliacao
+
+    @staticmethod
+    def _aplicar_filtro_linha_deslocada(leads):
+        """Reprova (motivo linha_deslocada_irrecuperavel) a linha deslocada cuja categoria não
+        foi recuperada com segurança ou que tem telefone/site/avaliações/nota com forma errada."""
+        aprovados, reprovados = [], []
+        for lead in leads:
+            info = lead.get("linha_deslocada")
+            if info and (not info["categoria_recuperada"] or info["campos_suspeitos"]):
+                lead["rejection_reason"] = MOTIVO_LINHA_DESLOCADA
+                lead["rejection_detail"] = dict(info)
+                reprovados.append(lead)
+            else:
+                aprovados.append(lead)
+        return aprovados, reprovados
+
+    @staticmethod
+    def _aplicar_filtro_categoria(leads, campanha):
+        """Corte de categoria da campanha ativa (fonte única das categorias no import). Cada
+        reprovado leva o motivo e, em `rejection_detail`, a categoria que causou o corte."""
+        aprovados, reprovados = [], []
+        for lead in leads:
+            corte = campanha_mod.motivo_categoria(lead.get("nicho"), campanha)
+            if corte:
+                motivo, termo = corte
+                lead["rejection_reason"] = motivo
+                lead["rejection_detail"] = {"categoria": lead.get("nicho"), "termo_excluido": termo,
+                                            "campanha_id": campanha["id"]}
+                reprovados.append(lead)
+            else:
+                aprovados.append(lead)
+        return aprovados, reprovados
 
     @staticmethod
     def _ler_csv(caminho_csv):
@@ -287,10 +419,14 @@ class AgentColetor:
         categorias = (linha.get("Categories") or "").strip()
         nicho = categorias.split(",")[0].strip() if categorias else ""
 
-        if nicho and CATEGORIA_INVALIDA_RE.search(nicho):
-            # Linha deslocada (ver CATEGORIA_INVALIDA_RE): a categoria REAL não sumiu, só
-            # mudou de coluna. Antes ela era descartada junto com o lixo.
+        linha_deslocada = None
+        padrao = padrao_de_linha_deslocada(nicho)
+        if padrao:
+            # Linha deslocada (CATEGORIA_INVALIDA_RE ou config/linha_deslocada.json): a categoria
+            # REAL não sumiu, só mudou de coluna. Antes ela era descartada junto com o lixo.
             recuperada = AgentColetor._recuperar_categoria_deslocada(linha)
+            linha_deslocada = {"padrao": padrao, "categoria_recuperada": bool(recuperada),
+                               "campos_suspeitos": _campos_suspeitos_na_linha_deslocada(linha)}
             if recuperada:
                 nicho = recuperada
                 # O que estava em Fulladdress era a categoria, não o endereço -- guardar
@@ -305,7 +441,7 @@ class AgentColetor:
             # referência no prompt (não só metadado interno) — ver CATEGORIA_INVALIDA_RE acima.
             nicho = "categoría sin especificar"
 
-        return {
+        lead = {
             "place_id": place_id,
             "nome": nome,
             "cidade": cidade,
@@ -326,6 +462,10 @@ class AgentColetor:
             "google_maps_url": google_maps_url,
             **gbp_crus,
         }
+        if linha_deslocada:
+            # Rastro de auditoria; o corte (se houver) é de _aplicar_filtro_linha_deslocada.
+            lead["linha_deslocada"] = linha_deslocada
+        return lead
 
     @staticmethod
     def _resolver_telefone(linha):
@@ -384,7 +524,7 @@ class AgentColetor:
                 continue
             if "," in candidato or "/" in candidato or any(c.isdigit() for c in candidato):
                 continue
-            if CATEGORIA_INVALIDA_RE.search(candidato):
+            if padrao_de_linha_deslocada(candidato):
                 continue
             return candidato
         return None

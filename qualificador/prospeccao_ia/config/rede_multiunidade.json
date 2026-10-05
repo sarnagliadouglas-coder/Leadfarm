@@ -1,0 +1,6 @@
+{
+    "versao": 1,
+    "descricao": "Filtro de redes / multiunidade no import (main.importar_csv, modulo rede_multiunidade.py). Fichas agrupadas por telefone normalizado e por dominio do site proprio, sobre todo o pool do QUALIFICADOR. Grupo com limiar_rede ou mais fichas: todas descartadas (rede_ou_multiunidade). Grupo menor que o limiar, com 2 ou mais fichas: nao descarta, marca o aviso possivel_mesmo_negocio. Dominio que nao e site proprio (config/dominios_site.json) nao forma grupo. 'marcas': comparadas contra o NOME do lead sem acento e sem maiuscula, por palavra inteira; o diretor amplia a lista editando este arquivo.",
+    "limiar_rede": 3,
+    "marcas": ["vitaldent", "vithas", "asisa", "sanitas", "adeslas", "dentix", "vivanta", "dentalios"]
+}

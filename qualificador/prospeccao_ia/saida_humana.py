@@ -35,7 +35,15 @@ import site_classificacao
 COLUNAS = (
     "pista", "motivo", "nome", "nicho", "cidade", "telefone", "email", "instagram", "site",
     "classe_site", "avaliacoes", "nota", "google_maps_url", "place_id",
+    # Acrescentadas no FIM em 2026-10 (nunca mudar a ordem das anteriores): carimbo da
+    # campanha ativa no import, aviso do filtro de redes (rede_multiunidade.py) e a
+    # prioridade da Onda 1 como lead_qualification.qualificar_onda1 já calcula.
+    "campanha_id", "campanha_nicho", "possivel_mesmo_negocio", "prioridade_rotulo", "prioridade_score",
 )
+
+# Valor das colunas de campanha/aviso quando o lead foi importado antes de o campo existir --
+# mesmo vocabulário de estado do contrato; nunca valor inventado.
+NAO_VERIFICADO = "NAO_VERIFICADO"
 
 PISTA_DIRETA = "direta"
 PISTA_ESPERA = "espera"
@@ -131,7 +139,30 @@ def _cidade_para_exibicao(emp):
     return m.group(1).strip().rstrip(",").strip() if m else ""
 
 
-def _linha(pista, motivo, emp, classe_site):
+def _campo_do_import(emp, campo):
+    if campo not in emp:
+        return NAO_VERIFICADO
+    return emp.get(campo) or ""
+
+
+def _possivel_mesmo_negocio(emp):
+    """place_id(s) da(s) outra(s) ficha(s), separados por vírgula. Vazio = checado, sem par;
+    NAO_VERIFICADO = lead importado antes do filtro de redes."""
+    if "possivel_mesmo_negocio" not in emp:
+        return NAO_VERIFICADO
+    ids = []
+    for par in emp.get("possivel_mesmo_negocio") or []:
+        pid = par.get("place_id") or ""
+        if pid and pid not in ids:
+            ids.append(pid)
+    return ", ".join(ids)
+
+
+def _linha(pista, motivo, emp, classe_site, qualificacao=None):
+    """`qualificacao`: bloco da Onda 1 (`leads_qualificados.json`); None nas linhas vindas da
+    Onda 2 -- aí prioridade_rotulo/prioridade_score ficam vazias (não há prioridade da Onda 1)."""
+    qualificacao = qualificacao or {}
+    prioridade_score = qualificacao.get("score")
     avaliacoes = emp.get("review_count")
     nota = emp.get("nota_google")
     return {
@@ -149,6 +180,11 @@ def _linha(pista, motivo, emp, classe_site):
         "nota": nota if nota is not None else "",
         "google_maps_url": emp.get("google_maps_url") or "",
         "place_id": emp.get("place_id") or "",
+        "campanha_id": _campo_do_import(emp, "campanha_id"),
+        "campanha_nicho": _campo_do_import(emp, "campanha_nicho"),
+        "possivel_mesmo_negocio": _possivel_mesmo_negocio(emp),
+        "prioridade_rotulo": qualificacao.get("priority") or "",
+        "prioridade_score": prioridade_score if prioridade_score is not None else "",
         # Chaves internas de ordenação -- nunca gravadas (escrever_csv usa extrasaction="ignore").
         "_avaliacoes_num": avaliacoes if isinstance(avaliacoes, (int, float)) else 0,
         "_nota_num": nota if isinstance(nota, (int, float)) else 0,
@@ -170,7 +206,7 @@ def montar_linhas(qualificados, com_site):
         emp = r["dados_empresa"]
         classe = _classe_do_registro(emp)
         motivo = MOTIVO_POR_CLASSE.get(classe, MOTIVO_POR_CLASSE[site_classificacao.SEM_SITE])
-        linhas.append(_linha(PISTA_DIRETA, motivo, emp, classe))
+        linhas.append(_linha(PISTA_DIRETA, motivo, emp, classe, r.get("qualificacao")))
 
     for r in com_site:
         if r.get("status") not in output_json._STATUS_ONDA2_PRONTOS or not r.get("dados_empresa"):

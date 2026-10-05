@@ -1,6 +1,6 @@
 # Contrato QUALIFICADOR → COMERCIAL
 
-**Versão:** 2.1.0
+**Versão:** 2.2.0
 **Schema formal:** `leads_qualificados.schema.json` (JSON Schema draft 2020-12)
 **Arquivo físico:** `leads_qualificados_<AAAAMMDD>-<HHMMSS>_v<contract_version>.json`, gravado em `QUALIFICADOR_OUTPUT_DIR` (hoje `EQC\pipeline\qualificador-output\`)
 **Sidecar:** `<mesmo-nome-base>.meta.json`
@@ -39,6 +39,54 @@ COMERCIAL e não atravessa este contrato.
 
 `priority` e `priority_label` nunca são o mesmo campo: `priority_label` tem um estado extra (`needs_review`) que `priority` não representa. Não assuma equivalência.
 
+## Campanha e aviso de mesmo negócio (2.2.0)
+
+| Campo | Onde | Conteúdo |
+|---|---|---|
+| `campanha_id` | cada lead de `nata` / `candidatos_triagem` e cada item de `descartados` | `{valor, estado}`: id da campanha ativa (`EQC/config/campanha_ativa.json`) no momento do import do lead. Nunca re-carimbado. Lead importado antes de 2.2.0 → `{valor: null, estado: NAO_VERIFICADO}` |
+| `campanha_nicho` | idem | `{valor, estado}`: rótulo humano do nicho da campanha (campo `nicho` da campanha). Mesma regra de `NAO_VERIFICADO` |
+| `possivel_mesmo_negocio` | cada lead de `nata` / `candidatos_triagem` | `{valor, estado}`. O filtro de redes do QUALIFICADOR agrupa fichas por telefone normalizado e por domínio do site próprio (domínio de portal, construtor, rede social ou página do Google não agrupa), sobre todo o pool. Grupo com 3+ fichas é descartado (`rede_ou_multiunidade`); grupo de 2 não é descartado e marca as duas: `valor` = lista `[{place_id, por: telefone\|dominio, chave}]` da(s) outra(s) ficha(s), `estado: CONFIRMADO_PRESENTE`. Checado sem par → `{valor: null, estado: CONFIRMADO_AUSENTE}`. Lead anterior ao filtro → `NAO_VERIFICADO`. É **aviso**, não julgamento: o COMERCIAL decide o que fazer |
+
+Motivos de descarte acrescentados em 2.2.0 (`descartados[*].motivo` é texto livre no
+schema): `rede_ou_multiunidade` e `linha_deslocada_irrecuperavel`. Os cortes de categoria da
+campanha usam os motivos já existentes `icp_categoria_fora_do_perfil` /
+`icp_categoria_excluida`. Quando o import gravou o detalhe do corte, ele vem em
+`campos_do_corte.detalhe_do_corte` (`{valor, estado: CONFIRMADO_PRESENTE}`).
+
+## CSV humano (fronteira QUALIFICADOR → COMERCIAL)
+
+Além do JSON, o QUALIFICADOR grava a cada `saida` um CSV com as pistas **Direta** e
+**Espera** — os leads que **não** atravessam o JSON (sem site próprio, ou site próprio sem
+problema vendável que não virou candidato à triagem). É a fonte da aba Geral da planilha do
+COMERCIAL. **Não** é validado por schema: este quadro é a referência legível.
+
+- Arquivo: `qualificador_<AAAAMMDD>-<HHMMSS>.csv` (sem número de versão), em
+  `EQC/pipeline/saidas-humanas/` (env `QUALIFICADOR_SAIDA_HUMANA_OUTPUT_DIR` vence).
+- Formato: UTF-8 com BOM, delimitador `;`, uma linha de cabeçalho.
+- **Colunas novas entram sempre no fim**; a ordem das existentes não muda.
+
+| # | Coluna | Conteúdo |
+|---|---|---|
+| 1 | `pista` | `direta` \| `espera` |
+| 2 | `motivo` | Por que está na pista (`sem site`, `site é portal`, `site é rede social`, `site é página do Google`, `site em construtor gratuito`, `sem problema encontrado`) |
+| 3 | `nome` | Nome da ficha do Google |
+| 4 | `nicho` | 1ª categoria do Google (corrigida nas linhas deslocadas) |
+| 5 | `cidade` | Cidade depois do CEP; vazia quando não confiável |
+| 6 | `telefone` | Telefone resolvido |
+| 7 | `email` | 1º e-mail |
+| 8 | `instagram` | Instagram |
+| 9 | `site` | Valor do campo Website da ficha |
+| 10 | `classe_site` | `sem_site` \| `portal` \| `rede_social` \| `superficie_google` \| `construtor` \| `proprio` |
+| 11 | `avaliacoes` | Número de avaliações; vazio se desconhecido |
+| 12 | `nota` | Nota do Google; vazia se desconhecida |
+| 13 | `google_maps_url` | Link da ficha |
+| 14 | `place_id` | Identificador da ficha |
+| 15 | `campanha_id` | (2.2.0) id da campanha ativa no import; `NAO_VERIFICADO` em lead anterior ao carimbo |
+| 16 | `campanha_nicho` | (2.2.0) nicho da campanha ativa no import; `NAO_VERIFICADO` idem |
+| 17 | `possivel_mesmo_negocio` | (2.2.0) place_id(s) da(s) outra(s) ficha(s) do par, separados por vírgula; vazio = checado sem par; `NAO_VERIFICADO` = lead anterior ao filtro |
+| 18 | `prioridade_rotulo` | (2.2.0) Prioridade da Onda 1 (`alta` \| `media` \| `baixa`, `qualificacao.priority`); vazio nas linhas que vêm da Onda 2. **Não autoritativa**, como `priorizacao` |
+| 19 | `prioridade_score` | (2.2.0) Score da Onda 1 (0–100, `qualificacao.score`); vazio nas linhas da Onda 2. **Não autoritativo** |
+
 ## O que **não** está no contrato (removido deliberadamente)
 
 - `extractor_opportunity_raw` — julgamento comercial do EXTRATOR (regra "Unclaimed = oportunidade"), nunca deveria atravessar esta fronteira.
@@ -65,6 +113,22 @@ Importante para o A1: `NAO_VERIFICADO` não é o mesmo que `CONFIRMADO_AUSENTE`.
 Chaves e enums em português. Valores de texto livre (nomes, endereços, categorias) preservam o idioma da fonte (espanhol, leads da Espanha). Ver decisão D5 no histórico do projeto.
 
 ## Histórico de versões
+
+### 2.2.0 — MINOR, aditiva
+Acrescenta, por lead (`nata`, `candidatos_triagem`), os campos **obrigatórios**
+`campanha_id`, `campanha_nicho` e `possivel_mesmo_negocio`, e por descartado
+`campanha_id` e `campanha_nicho` — todos `{valor, estado}`, com `NAO_VERIFICADO` para lead
+importado antes de 2.2.0. Documenta os motivos de descarte `rede_ou_multiunidade` e
+`linha_deslocada_irrecuperavel` e o `campos_do_corte.detalhe_do_corte`. Documenta, como
+fronteira, as colunas do CSV humano, com cinco colunas novas no fim (`campanha_id`,
+`campanha_nicho`, `possivel_mesmo_negocio`, `prioridade_rotulo`, `prioridade_score`).
+Conjunto de chaves obrigatórias mudou; MINOR segue o precedente de 1.1.0 (`linkedin`).
+**Não é compatível em nenhum dos dois sentidos:** como os campos novos são obrigatórios, o
+schema 2.2.0 recusa arquivos 2.1.0 (faltam as chaves e o `const` de `contract_version` é
+outro), e um consumidor 2.1.0 recusa arquivos 2.2.0 (`contract_version` diferente e
+`additionalProperties: false` nos blocos `lead` e `descartado`). Produtor e consumidor
+precisam passar para 2.2.0 juntos.
+Autorizado pelo diretor, 04/10/2026.
 
 ### 2.1.0 — MINOR, aditiva
 Acrescenta o campo opcional `texto_site` por lead: o texto visível do site

@@ -8,9 +8,10 @@ import telefone_utils
 
 CAMINHO_ICP = os.path.join(os.path.dirname(__file__), "config", "ideal_customer_profile.json")
 
+# Categorias NÃO moram mais no ICP (decisão do diretor, 04/10/2026): a única fonte é a
+# campanha ativa (campanha.py, EQC/config/campanha_ativa.json), aplicada no import antes da
+# separação em ondas. Chave de categoria esquecida num ICP antigo é ignorada.
 ICP_DEFAULT = {
-    "categorias_desejadas": [],
-    "categorias_excluidas": [],
     "rating_minimo": 0,
     "reviews_minimo": 0,
     "cidades_prioritarias": [],
@@ -39,31 +40,19 @@ def icp_tem_filtro_ativo(icp: dict) -> bool:
     """True se o ICP tem QUALQUER corte configurado. Com a config padrão (listas vazias e
     pisos em 0) o pré-filtro não reprova ninguém — o relatório usa isto pra dizer
     "nenhum filtro configurado" em vez de deixar parecer que a etapa falhou. Reputação
-    nunca corta por padrão (decisão do Douglas: nota é sinal, não gate); o filtro útil
-    aqui é categorias_excluidas, pra descartar um segmento inteiro sem mexer em código."""
+    nunca corta por padrão (decisão do Douglas: nota é sinal, não gate). Categoria não conta:
+    vive na campanha ativa (campanha.py), não no ICP."""
     return bool(
-        (icp.get("categorias_desejadas") or [])
-        or (icp.get("categorias_excluidas") or [])
-        or (icp.get("rating_minimo") or 0) > 0
+        (icp.get("rating_minimo") or 0) > 0
         or (icp.get("reviews_minimo") or 0) > 0
     )
 
 
 def _motivo_exclusao_icp(lead: dict, icp: dict) -> str | None:
-    """Só corta por categoria ou por rating/reviews CONHECIDOS abaixo do piso configurado.
-    Nunca corta por ausência de dado, e rating/reviews ficam desligados por padrão (piso 0) —
-    preserva a regra já validada nesta sessão: reputação é sinal, nunca gate automático."""
-    nicho = f" {(lead.get('nicho') or '').lower()} "
-
-    desejadas = icp.get("categorias_desejadas") or []
-    if desejadas and not any(termo.lower() in nicho for termo in desejadas):
-        return "icp_categoria_fora_do_perfil"
-
-    excluidas = icp.get("categorias_excluidas") or []
-    for termo in excluidas:
-        if termo.lower() in nicho:
-            return "icp_categoria_excluida"
-
+    """Só corta por rating/reviews CONHECIDOS abaixo do piso configurado. Nunca corta por
+    ausência de dado, e rating/reviews ficam desligados por padrão (piso 0) — reputação é
+    sinal, nunca gate automático. Categoria NÃO é critério daqui (04/10/2026): o corte de
+    categoria é da campanha ativa, no import (campanha.motivo_categoria)."""
     rating_minimo = icp.get("rating_minimo") or 0
     nota = lead.get("nota_google")
     if rating_minimo > 0 and nota is not None and nota < rating_minimo:

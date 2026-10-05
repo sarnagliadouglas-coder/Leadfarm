@@ -58,6 +58,10 @@ _CAMPOS_POR_MOTIVO = {
     "icp_categoria_excluida": ["nicho"],
     "icp_rating_abaixo_minimo": ["nota_google"],
     "icp_reviews_abaixo_minimo": ["review_count"],
+    # contract_version 2.2.0: filtro de redes / multiunidade (rede_multiunidade.py).
+    "rede_ou_multiunidade": ["nome", "telefone", "website"],
+    # contract_version 2.2.0: linha de CSV deslocada sem recuperação segura (agent_coletor).
+    "linha_deslocada_irrecuperavel": ["nicho"],
 }
 
 
@@ -101,6 +105,37 @@ def _contato(emp):
         "linkedin": _campo_verificado(emp.get("linkedin")),
         "whatsapp_apto": whatsapp_apto,
     }
+
+
+def _campo_do_import(emp, campo):
+    """contract_version 2.2.0: campo gravado pelo import (carimbo da campanha). Lead
+    importado antes de existir o campo -> NAO_VERIFICADO, nunca valor inventado."""
+    if campo not in emp:
+        return {"valor": None, "estado": NAO_VERIFICADO}
+    return _campo_verificado(emp.get(campo))
+
+
+def _possivel_mesmo_negocio(emp):
+    """contract_version 2.2.0: aviso do filtro de redes (grupo de 2 fichas por telefone ou
+    domínio próprio). Ausente = lead anterior ao filtro (NAO_VERIFICADO); [] = checado, sem
+    par (CONFIRMADO_AUSENTE); lista = place_id(s) da(s) outra(s) ficha(s).
+
+    Uma entrada por place_id: quando o par divide telefone E domínio, fica só a 1ª
+    ocorrência (ordem estável; rede_multiunidade.agrupar põe telefone antes de domínio) --
+    mesma deduplicação do CSV humano (saida_humana._possivel_mesmo_negocio)."""
+    if "possivel_mesmo_negocio" not in emp:
+        return {"valor": None, "estado": NAO_VERIFICADO}
+    pares = emp.get("possivel_mesmo_negocio") or []
+    if not pares:
+        return {"valor": None, "estado": CONFIRMADO_AUSENTE}
+    valor, vistos = [], set()
+    for p in pares:
+        pid = p.get("place_id")
+        if pid in vistos:
+            continue
+        vistos.add(pid)
+        valor.append({"place_id": pid, "por": p.get("por"), "chave": p.get("chave")})
+    return {"valor": valor, "estado": CONFIRMADO_PRESENTE}
 
 
 def _reputacao(emp):
@@ -362,6 +397,9 @@ def _lead_saida(registro, estagio):
     return {
         "place_id": emp.get("place_id"),
         "estagio_analise": estagio,
+        "campanha_id": _campo_do_import(emp, "campanha_id"),
+        "campanha_nicho": _campo_do_import(emp, "campanha_nicho"),
+        "possivel_mesmo_negocio": _possivel_mesmo_negocio(emp),
         "identidade": _identidade(emp),
         "contato": _contato(emp),
         "reputacao": _reputacao(emp),
@@ -421,8 +459,16 @@ def _descartado_saida(registro):
     for campo in _CAMPOS_POR_MOTIVO.get(motivo, []):
         presente_quando = (lambda v: v is not None) if campo in ("nota_google", "review_count") else None
         campos[campo] = _campo_verificado(emp.get(campo), presente_quando)
+    # 2.2.0: o detalhe do corte gravado no import (categoria que causou o corte de
+    # campanha; grupo de rede com por/chave/tamanho_grupo; padrão de linha deslocada)
+    # atravessa como fato.
+    detalhe = registro.get("rejection_detail")
+    if detalhe:
+        campos["detalhe_do_corte"] = {"valor": detalhe, "estado": CONFIRMADO_PRESENTE}
     return {
         "place_id": emp.get("place_id"),
+        "campanha_id": _campo_do_import(emp, "campanha_id"),
+        "campanha_nicho": _campo_do_import(emp, "campanha_nicho"),
         "identidade": {"nome": emp.get("nome"), "nicho": emp.get("nicho"), "cidade": emp.get("cidade")},
         "motivo": motivo,
         "campos_do_corte": campos,

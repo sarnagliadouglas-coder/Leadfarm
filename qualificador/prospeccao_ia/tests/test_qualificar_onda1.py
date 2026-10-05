@@ -132,7 +132,7 @@ def test_icp_exclusao_zera_score_mas_nao_derruba_o_pipeline():
     """qualificar_onda1 roda DEPOIS do filtrar_icp no funil real, então isso nunca deveria
     acontecer na prática -- mas se acontecer, não pode quebrar (reaproveita a mesma checagem
     defensiva que commercial_fit_score já tem)."""
-    icp = dict(lq.ICP_DEFAULT, categorias_excluidas=["fisioterap"])
-    lead = _lead(nicho="Fisioterapeuta")
+    icp = dict(lq.ICP_DEFAULT, rating_minimo=5.0)
+    lead = _lead(nicho="Fisioterapeuta", nota_google=4.5)
     resultado = lq.qualificar_onda1(lead, icp)
     assert resultado["score"] == 0

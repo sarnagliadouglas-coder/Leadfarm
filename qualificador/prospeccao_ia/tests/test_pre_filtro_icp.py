@@ -1,3 +1,5 @@
+import pytest
+
 import lead_qualification as lq
 
 
@@ -14,25 +16,28 @@ def test_defaults_sao_totalmente_permissivos(lead_excelente_sem_site, lead_ruim_
     assert reprovados == []
 
 
-def test_categoria_desejada_filtra_fora_do_perfil(lead_excelente_sem_site):
-    icp = _icp(categorias_desejadas=["psicolog"])
-    aprovados, reprovados = lq.filtrar_icp([lead_excelente_sem_site], icp)
-    assert aprovados == []
-    assert reprovados[0]["rejection_reason"] == "icp_categoria_fora_do_perfil"
+def test_icp_default_nao_tem_chave_de_categoria():
+    assert "categorias_desejadas" not in lq.ICP_DEFAULT
+    assert "categorias_excluidas" not in lq.ICP_DEFAULT
 
 
-def test_categoria_desejada_aceita_match_por_substring(lead_excelente_sem_site):
-    icp = _icp(categorias_desejadas=["fisioterap"])
-    aprovados, reprovados = lq.filtrar_icp([lead_excelente_sem_site], icp)
-    assert len(aprovados) == 1
-    assert reprovados == []
+def test_config_icp_do_repo_nao_tem_chave_de_categoria():
+    icp = lq.carregar_icp()
+    assert "categorias_desejadas" not in icp and "categorias_excluidas" not in icp
 
 
-def test_categoria_excluida_reprova(lead_excelente_sem_site):
-    icp = _icp(categorias_excluidas=["fisioterap"])
-    aprovados, reprovados = lq.filtrar_icp([lead_excelente_sem_site], icp)
-    assert aprovados == []
-    assert reprovados[0]["rejection_reason"] == "icp_categoria_excluida"
+@pytest.mark.parametrize("chave,termos", [("categorias_desejadas", ["psicolog"]),
+                                          ("categorias_excluidas", ["fisioterap"])])
+def test_icp_nao_corta_mais_por_categoria(lead_excelente_sem_site, chave, termos):
+    """Categoria é só da campanha ativa (04/10/2026). Chave antiga num ICP é ignorada."""
+    aprovados, reprovados = lq.filtrar_icp([lead_excelente_sem_site], _icp(**{chave: termos}))
+    assert len(aprovados) == 1 and reprovados == []
+
+
+def test_icp_ainda_corta_por_rating_controle_negativo(lead_excelente_sem_site):
+    """Controle: o pré-filtro continua cortando pelo que ainda é dele (rating)."""
+    aprovados, reprovados = lq.filtrar_icp([lead_excelente_sem_site], _icp(rating_minimo=5.0))
+    assert aprovados == [] and reprovados[0]["rejection_reason"] == "icp_rating_abaixo_minimo"
 
 
 def test_rating_minimo_desligado_por_padrao_nao_corta_lead_ruim(lead_ruim_sem_site):
@@ -80,8 +85,8 @@ def test_icp_tem_filtro_ativo_falso_com_config_padrao():
     assert lq.icp_tem_filtro_ativo(dict(lq.ICP_DEFAULT)) is False
 
 
-def test_icp_tem_filtro_ativo_verdadeiro_com_categoria_excluida():
-    assert lq.icp_tem_filtro_ativo(_icp(categorias_excluidas=["dental"])) is True
+def test_icp_tem_filtro_ativo_ignora_categoria():
+    assert lq.icp_tem_filtro_ativo(_icp(categorias_excluidas=["dental"])) is False
 
 
 def test_icp_tem_filtro_ativo_verdadeiro_com_rating_minimo():

@@ -107,8 +107,7 @@ def test_filtro_roda_depois_do_icp_e_antes_da_qualification(tmp_path, monkeypatc
     por falta de canal -- os dois filtros são independentes e cada lead cai em só um."""
     caminhos = _isolar_paths(tmp_path, monkeypatch)
     icp_customizado = {
-        "categorias_desejadas": [], "categorias_excluidas": ["dentista"],
-        "rating_minimo": 0, "reviews_minimo": 0, "cidades_prioritarias": [],
+        "rating_minimo": 4.0, "reviews_minimo": 0, "cidades_prioritarias": [],
         "sinais_valorizados": {},
     }
     # carregar_icp(caminho=CAMINHO_ICP) tem o default resolvido na definição da função --
@@ -116,7 +115,7 @@ def test_filtro_roda_depois_do_icp_e_antes_da_qualification(tmp_path, monkeypatc
     # função inteira é o jeito direto de injetar o ICP customizado neste teste.
     monkeypatch.setattr(main_mod.lead_qualification, "carregar_icp", lambda *a, **k: dict(icp_customizado))
 
-    lead_excluido_por_icp = _lead_sem_canal(place_id="icp_1", nicho="Dentista")
+    lead_excluido_por_icp = _lead_sem_canal(place_id="icp_1", nicho="Dentista", nota_google=3.0)
     caminhos["PATH_COLETADOS"].write_text(json.dumps([
         {"dados_empresa": lead_excluido_por_icp, "status": "eligible"}
     ]), encoding="utf-8")
@@ -126,4 +125,4 @@ def test_filtro_roda_depois_do_icp_e_antes_da_qualification(tmp_path, monkeypatc
     assert metricas["total_reprovados_icp"] == 1
     assert metricas["total_reprovados_contato"] == 0  # nunca chegou no segundo filtro
     reprovados = _ler(caminhos["PATH_REPROVADOS"])
-    assert reprovados[0]["rejection_reason"] == "icp_categoria_excluida"
+    assert reprovados[0]["rejection_reason"] == "icp_rating_abaixo_minimo"

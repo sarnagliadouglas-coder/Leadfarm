@@ -18,7 +18,9 @@ from pathlib import Path
 
 # 2.0.0: separa nata/candidatos_triagem e transporta sinais renderizados do site.
 # 2.1.0: acrescenta o campo opcional texto_site (MINOR, aditivo -- CONTRACT.md).
-CONTRACT_VERSION = "2.1.0"
+# 2.2.0: acrescenta campanha_id, campanha_nicho e possivel_mesmo_negocio por lead, e
+#        campanha_id/campanha_nicho por descartado (CONTRACT.md, histórico de versões).
+CONTRACT_VERSION = "2.2.0"
 QUALIFICADOR_VERSION = "1.1.0"
 SCHEMA_VERSION_INTERNO = "2.0"
 

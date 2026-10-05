@@ -1,0 +1,8 @@
+{
+    "versao": 1,
+    "descricao": "Marcadores de linha de CSV com colunas deslocadas, ALEM dos textos 'sem avaliacao' de agent_coletor.CATEGORIA_INVALIDA_RE. Quando a 1a categoria de 'Categories' casa um marcador, a categoria real e buscada em Fulladdress/Street (agent_coletor._recuperar_categoria_deslocada) e telefone/site/avaliacoes/nota da linha sao conferidos; sem recuperacao segura o lead vai para reprovados com motivo linha_deslocada_irrecuperavel. Observado em 04/10/2026 no CSV de abogados de Alicante: glifo de icone (caractere Unicode de uso privado, ex. U+E934) e texto de horario ('Apertura: 9:00 (lun)') no lugar da categoria.",
+    "categoria_com_caractere_de_uso_privado": true,
+    "marcadores_regex": [
+        "^\\s*(apertura|abre|cierra|cierre|abierto|cerrado)\\b.*\\d{1,2}:\\d{2}"
+    ]
+}

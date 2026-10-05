@@ -18,10 +18,17 @@ def _lead(**overrides):
 
 
 def test_lead_excluido_pelo_icp_zera_score():
-    icp = _icp(categorias_excluidas=["fisioterap"])
+    icp = _icp(rating_minimo=4.9)  # lead tem nota 4.8: corte por rating ainda zera o score
     score, razoes = lq.commercial_fit_score(_lead(), icp)
     assert score == 0
     assert "icp" in razoes[0].lower()
+
+
+def test_icp_nao_zera_score_por_categoria():
+    """Categoria saiu do ICP (04/10/2026): chave antiga esquecida no ICP é ignorada."""
+    icp = _icp(categorias_excluidas=["fisioterap"], categorias_desejadas=["psicolog"])
+    score, _ = lq.commercial_fit_score(_lead(), icp)
+    assert score > 0
 
 
 def test_reputacao_strong_pontua_mais_que_weak():

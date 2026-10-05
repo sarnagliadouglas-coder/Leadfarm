@@ -1,3 +1,4 @@
+import json
 import sys
 import os
 from pathlib import Path
@@ -59,8 +60,17 @@ def _guardiao_pastas_producao():
         pytest.fail(guardiao.mensagem_de_falha(linhas), pytrace=False)
 
 
+@pytest.fixture(scope="session")
+def _campanha_teste_path(tmp_path_factory):
+    """Arquivo da campanha de teste, fora do tmp_path de cada teste (há testes que
+    inspecionam o próprio tmp_path)."""
+    caminho = tmp_path_factory.mktemp("campanha") / "campanha_teste.json"
+    caminho.write_text(json.dumps(CAMPANHA_TESTE), encoding="utf-8")
+    return str(caminho)
+
+
 @pytest.fixture(autouse=True)
-def _isolar_persistencia_de_dados(tmp_path, monkeypatch):
+def _isolar_persistencia_de_dados(tmp_path, monkeypatch, _campanha_teste_path):
     """Rede de segurança estrutural pra suíte inteira: NENHUM teste pode escrever em data/
     real, mesmo que esqueça de isolar os caminhos manualmente. autouse=True aplica isto a
     TODO teste, sem exceção -- redireciona os PATH_* de main.py pra um tmp_path novo a cada
@@ -91,6 +101,20 @@ def _isolar_persistencia_de_dados(tmp_path, monkeypatch):
     # A fase de renderizacao (navegador, ~1 min por site) e DESLIGADA por padrao. Um RENDER_ENABLED
     # esquecido no shell de quem roda a suite nao pode ligar navegador dentro de um teste.
     monkeypatch.delenv("RENDER_ENABLED", raising=False)
+    # Campanha ativa: a suíte NUNCA lê a campanha real do EQC (ela muda a cada campo de
+    # teste e cortaria os leads fictícios das fixtures). Campanha de teste que aceita a
+    # categoria usada nas fixtures de import ("Fisioterapeuta"); testes de campanha
+    # apontam QUALIFICADOR_CAMPANHA para o próprio arquivo por cima disto.
+    monkeypatch.setenv("QUALIFICADOR_CAMPANHA", _campanha_teste_path)
+
+
+CAMPANHA_TESTE = {
+    "id": "campanha-teste",
+    "nicho": "Fisioterapeutas (teste)",
+    "cidade": "Cidade Ficticia",
+    "categorias_aceitas": ["fisioterap"],
+    "categorias_excluidas": [],
+}
 
 
 def _lead(**overrides):
