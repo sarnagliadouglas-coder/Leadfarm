@@ -41,6 +41,22 @@ Uso:
     lote.candidatos_triagem                               # só os candidatos à triagem visual
     lote.descartados                                       # lista crua, fora da proteção de LeadQualificado
 
+Campos da 2.2.0 (nomes exatos dos atributos; cada um devolve um `CampoEvidencia`,
+com `.presente()` / `.confirmado_ausente()` / `.nao_verificado()` /
+`.valor_confirmado` / `.bruto()`):
+    lead.campanha_id               # id da campanha ativa no import; NAO_VERIFICADO
+                                   #   (valor null) em lead importado antes da 2.2.0
+    lead.campanha_nicho            # rótulo do nicho da campanha; idem
+    lead.possivel_mesmo_negocio    # aviso do filtro de redes/multiunidade (é aviso,
+                                   #   não julgamento). CONFIRMADO_PRESENTE: valor é a
+                                   #   lista de {place_id, por, chave} das outras
+                                   #   fichas; CONFIRMADO_AUSENTE: checado, sem par;
+                                   #   NAO_VERIFICADO: lead importado antes do filtro
+    lead["campanha_id"] etc.       # mesmo objeto, pelo acesso por índice
+    campanha_do_descartado(d)      # d = item de lote.descartados -> dict
+                                   #   {"campanha_id": CampoEvidencia,
+                                   #    "campanha_nicho": CampoEvidencia}
+
 Configuração por ambiente (localização do EQC — resolvida por `eqc.py`, sem
 caminho absoluto de máquina fixo no código):
     COMERCIAL_CONTRACT_SCHEMA  caminho final do leads_qualificados.schema.json
@@ -57,7 +73,7 @@ Requisitos:
 Trava de versão
 ----------------
 `leads_qualificados.schema.json` já declara `contract_version` como
-`"const": "2.0.0"` — um documento com outra versão já reprova na validação
+`"const": "2.2.0"` (o valor de `VERSAO_CONTRATO_SUPORTADA`) — um documento com outra versão já reprova na validação
 de schema. Este módulo verifica a versão de novo, separadamente, depois da
 validação. A razão para a redundância: a garantia de schema depende de
 qual arquivo de schema foi carregado. Se `COMERCIAL_CONTRACT_SCHEMA` algum
@@ -206,7 +222,11 @@ ENV_SCHEMA = eqc.ENV_CONTRACT_SCHEMA            # "COMERCIAL_CONTRACT_SCHEMA"
 # contrato (CONTRACT.md, seção "Histórico de versões").
 # 2.1.0 (24/09/2026): acrescenta o campo opcional texto_site (MINOR,
 # aditivo) -- lotes 2.0.0 não são mais aceitos (serão refeitos).
-VERSAO_CONTRATO_SUPORTADA = "2.1.0"
+# 2.2.0 (05/10/2026): acrescenta por lead os campos obrigatórios campanha_id,
+# campanha_nicho e possivel_mesmo_negocio, e por descartado campanha_id e
+# campanha_nicho -- lotes 2.1.0 não são mais aceitos (regerar a saída no
+# QUALIFICADOR).
+VERSAO_CONTRATO_SUPORTADA = "2.2.0"
 
 # leads_qualificados_20260906-201042_v2.0.0.json
 # O `.meta.json` que acompanha cada lote NÃO é um arquivo de leads e é
@@ -384,6 +404,17 @@ def _envolver_evidencias(valor: Any) -> Any:
     return valor
 
 
+def campanha_do_descartado(descartado: Mapping) -> dict:
+    """`campanha_id` e `campanha_nicho` de um item de `Lote.descartados`
+    (contrato 2.2.0), como `CampoEvidencia`. `descartados` segue crua fora
+    disto -- só estes dois campos ganham a proteção de estado.
+    """
+    return {
+        "campanha_id": CampoEvidencia(descartado["campanha_id"]),
+        "campanha_nicho": CampoEvidencia(descartado["campanha_nicho"]),
+    }
+
+
 def psi_estado(lead: "LeadQualificado") -> str:
     """Um dos três estados de `lead["psi"]`, sem exigir checagem manual de `None`.
 
@@ -519,6 +550,28 @@ class LeadQualificado(Mapping):
         deve pegar isso antes.
         """
         return BlocoNaoAutoritativo(self._dados[CHAVE_PRIORIZACAO])
+
+    # -- campos da 2.2.0 (CampoEvidencia, mesmo padrão dos demais) -----
+
+    @property
+    def campanha_id(self) -> "CampoEvidencia":
+        """Campanha ativa no import do lead (contrato 2.2.0). `NAO_VERIFICADO`
+        (valor null) para lead importado antes da 2.2.0."""
+        return self["campanha_id"]
+
+    @property
+    def campanha_nicho(self) -> "CampoEvidencia":
+        """Nicho (rótulo humano) da campanha ativa no import (contrato 2.2.0)."""
+        return self["campanha_nicho"]
+
+    @property
+    def possivel_mesmo_negocio(self) -> "CampoEvidencia":
+        """Aviso do filtro de redes/multiunidade (contrato 2.2.0): ficha que
+        divide telefone ou domínio com outra(s) do pool. É aviso, não
+        julgamento. CONFIRMADO_PRESENTE -> `.valor_confirmado` é a lista de
+        `{place_id, por, chave}`; CONFIRMADO_AUSENTE -> checado, sem par;
+        NAO_VERIFICADO -> importado antes do filtro."""
+        return self["possivel_mesmo_negocio"]
 
     # -- escotilha explícita ------------------------------------------
 
@@ -712,10 +765,17 @@ def validar(documento: Any, schema: dict, origem: Optional[Path] = None) -> None
     )
 
 
+_DICA_REGERAR = (
+    " Lote 2.1.0 é anterior aos campos de campanha e de possível mesmo "
+    "negócio: é preciso regerar a saída no QUALIFICADOR (contrato 2.2.0)."
+)
+
+
 def _verificar_versao(documento: Any, origem: Path) -> None:
     """Confere `contract_version` contra VERSAO_CONTRATO_SUPORTADA.
 
-    Roda depois de `validar()`. Ver "Trava de versão" no docstring do
+    Roda antes de `validar()` (para um lote de versão antiga dar a mensagem
+    de versão, não uma violação genérica de `const`). Ver "Trava de versão" no docstring do
     módulo — é uma checagem redundante com o `const` do schema por design,
     não por descuido.
     """
@@ -723,7 +783,8 @@ def _verificar_versao(documento: Any, origem: Path) -> None:
     if versao != VERSAO_CONTRATO_SUPORTADA:
         raise VersaoContratoNaoSuportadaError(
             f"Arquivo {origem} declara contract_version={versao!r}, mas este "
-            f"módulo só entende {VERSAO_CONTRATO_SUPORTADA!r}. Um schema mais "
+            f"módulo só entende {VERSAO_CONTRATO_SUPORTADA!r}."
+            f"{_DICA_REGERAR if versao == '2.1.0' else ''} Um schema mais "
             f"novo poderia validar este arquivo estruturalmente sem que este "
             f"código tenha sido revisado para o que mudou — ver CONTRACT.md, "
             f"seção 'Histórico de versões', antes de atualizar "
@@ -806,8 +867,10 @@ def carregar_lote(
     except OSError as exc:
         raise ArquivoDeEntradaError(f"Não foi possível ler {origem}: {exc}") from exc
 
-    validar(documento, esquema, origem=origem)
+    # Versão antes do schema: o `const` do schema reprovaria um lote 2.1.0 com
+    # uma violação genérica; a trava de versão dá a mensagem acionável.
     _verificar_versao(documento, origem)
+    validar(documento, esquema, origem=origem)
 
     nata = [LeadQualificado(bruto) for bruto in _extrair_lista(documento, CHAVE_NATA, origem)]
     candidatos_triagem = [

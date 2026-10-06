@@ -374,6 +374,15 @@ def test_ponta_a_ponta_gerar_preencher_registrar_e_excluir_na_proxima_planilha(t
             "problema_vendavel": [],
             "psi": {"estado": "NAO_VERIFICADO", "lcp_ms": None, "motivo": None, "medido_em": None, "rodadas": 1},
             "texto_site": None,
+            # contrato 2.2.0 (Etapa 2)
+            "campanha_id": {"valor": "psicologos-teste", "estado": "CONFIRMADO_PRESENTE"},
+            "campanha_nicho": {"valor": "Psicólogos", "estado": "CONFIRMADO_PRESENTE"},
+            "possivel_mesmo_negocio": {"valor": None, "estado": "CONFIRMADO_AUSENTE"},
+            "priorizacao": {
+                "autoritativo": False, "commercial_fit_score": 50, "priority": None, "contactability": None,
+                "risks": None, "reasons": [], "website_opportunity_score": 40.0, "priority_score": 61.5,
+                "priority_label": "media", "lacunas_interpretadas": [],
+            },
         })
 
     import csv
@@ -428,6 +437,20 @@ def test_ponta_a_ponta_gerar_preencher_registrar_e_excluir_na_proxima_planilha(t
     registrados = ra.place_ids_registrados(ra.caminho_registro(diretorio_registro))
     assert registrados == {"p-geral", "p-nata"}
 
+    # Etapa 2: campanha/nicho/pista/prioridade chegam ao registro (Nata, do contrato 2.2.0;
+    # Geral, CSV humano antigo sem as colunas novas -> NAO_VERIFICADO, prioridade vazia)
+    wb_reg = load_workbook(ra.caminho_registro(diretorio_registro))
+    cab = [c.value for c in wb_reg.active[1]]
+    por_id = {r[cab.index("place_id")]: dict(zip(cab, r)) for r in wb_reg.active.iter_rows(min_row=2, values_only=True)}
+    assert por_id["p-nata"]["campanha"] == "psicologos-teste"
+    assert por_id["p-nata"]["nicho"] == "Psicólogos"
+    assert por_id["p-nata"]["pista"] == "nata"
+    assert por_id["p-nata"]["prioridade_rotulo"] == "media"
+    assert float(por_id["p-nata"]["prioridade_score"]) == 61.5
+    assert por_id["p-geral"]["campanha"] == "NAO_VERIFICADO"
+    assert por_id["p-geral"]["pista"] == "direta"
+    assert por_id["p-geral"]["prioridade_rotulo"] in ("", None)
+
     # 4) a próxima planilha exclui as duas
     resultado2 = pe.gerar_planilha(
         caminho_csv_humano=caminho_csv, saida_dir=saida_dir, caminho_registro=diretorio_registro / "registro_abordagens.xlsx",
@@ -469,7 +492,7 @@ def test_registro_antigo_ganha_colunas_novas_no_fim_sem_mexer_nas_antigas(tmp_pa
     gravada por nome de coluna, não por posição."""
     diretorio = tmp_path / "_abordagens"
     diretorio.mkdir()
-    antigas = [c for c in ra.COLUNAS_REGISTRO if c not in ("angulo", "variante")]
+    antigas = list(ra.COLUNAS_REGISTRO[: ra.COLUNAS_REGISTRO.index("angulo")])
     wb = Workbook()
     ws = wb.active
     ws.append(antigas)
@@ -487,7 +510,7 @@ def test_registro_antigo_ganha_colunas_novas_no_fim_sem_mexer_nas_antigas(tmp_pa
 
     wb = load_workbook(ra.caminho_registro(diretorio))
     cabecalho = [c.value for c in wb.active[1]]
-    assert cabecalho == antigas + ["angulo", "variante"]
+    assert cabecalho == antigas + ["angulo", "variante"] + list(ra.COLUNAS_CAMPANHA_REGISTRO)
     linhas = list(wb.active.iter_rows(min_row=2, values_only=True))
     assert list(linhas[0][: len(antigas)]) == [v if v != "" else None for v in linha_antiga]
     nova = dict(zip(cabecalho, linhas[1]))
@@ -495,3 +518,81 @@ def test_registro_antigo_ganha_colunas_novas_no_fim_sem_mexer_nas_antigas(tmp_pa
     assert nova["canal"] == "whatsapp"
     assert nova["angulo"] == "portal"
     assert nova["variante"] == "A"
+
+
+# --- Etapa 2 (diretor, 04-05/10/2026): campanha, nicho, pista e prioridade -----
+
+
+def test_colunas_de_campanha_no_fim_do_registro():
+    assert ra.COLUNAS_CAMPANHA_REGISTRO == ("campanha", "nicho", "pista", "prioridade_rotulo", "prioridade_score")
+    assert ra.COLUNAS_REGISTRO[-5:] == ra.COLUNAS_CAMPANHA_REGISTRO
+    assert ra.COLUNAS_REGISTRO[: ra.COLUNAS_REGISTRO.index("variante") + 1][-2:] == ("angulo", "variante")
+
+
+def test_registro_grava_campanha_nicho_pista_e_prioridade_por_nome_de_coluna(tmp_path):
+    """Lidas por NOME das colunas da planilha de envio, em qualquer ordem."""
+    planilha = _planilha_com_envios(
+        tmp_path / "planilha.xlsx",
+        linhas_geral=[["p1", "Clínica A", "600000101", "2026-10-05", "72", "direta", "psico-1", "alta", "Psicólogos"]],
+        cabecalho_extra=["prioridade_score", "pista", "campanha", "prioridade_rotulo", "nicho"],
+    )
+    ra.registrar_envios(planilha, diretorio_registro=tmp_path / "_abordagens", opcoes_funil=_OPCOES_FUNIL)
+    _, linha = _linha_do_registro(tmp_path)
+    assert linha["campanha"] == "psico-1"
+    assert linha["nicho"] == "Psicólogos"
+    assert linha["pista"] == "direta"
+    assert linha["prioridade_rotulo"] == "alta"
+    assert str(linha["prioridade_score"]) == "72"
+
+
+def test_registro_planilha_sem_colunas_de_campanha_grava_vazio(tmp_path):
+    """Controle negativo: planilha anterior à Etapa 2 não inventa campanha."""
+    planilha = _planilha_com_envios(
+        tmp_path / "planilha.xlsx", linhas_geral=[["p1", "Clínica A", "600000101", "2026-10-05"]],
+    )
+    ra.registrar_envios(planilha, diretorio_registro=tmp_path / "_abordagens", opcoes_funil=_OPCOES_FUNIL)
+    _, linha = _linha_do_registro(tmp_path)
+    for coluna in ra.COLUNAS_CAMPANHA_REGISTRO:
+        assert linha[coluna] in ("", None)
+
+
+def test_registro_com_cabecalho_de_antes_da_etapa_2_continua_legivel_e_ganha_as_colunas(tmp_path):
+    """Registro gravado com o cabeçalho de 27/09 (até angulo/variante): continua
+    legível (place_ids reconhecidos, nada duplicado) e as colunas novas entram no FIM."""
+    diretorio = tmp_path / "_abordagens"
+    diretorio.mkdir()
+    cabecalho_antigo = list(ra.COLUNAS_REGISTRO[: ra.COLUNAS_REGISTRO.index("variante") + 1])
+    wb = Workbook()
+    ws = wb.active
+    ws.append(cabecalho_antigo)
+    linha_antiga = ["p0", "Clínica Vieja", "600000000", "Geral", "2026-09-30", "whatsapp", "", "",
+                    "2026-09-30T10:00:00Z", "1º contato", "sem resposta", "", "", "", "", "sem_site", ""]
+    assert len(linha_antiga) == len(cabecalho_antigo)
+    ws.append(linha_antiga)
+    wb.save(ra.caminho_registro(diretorio))
+
+    assert ra.place_ids_registrados(ra.caminho_registro(diretorio)) == {"p0"}
+
+    planilha = _planilha_com_envios(
+        tmp_path / "planilha.xlsx",
+        linhas_geral=[["p0", "Clínica Vieja", "600000000", "2026-09-30", "x"],
+                      ["p1", "Clínica A", "600000101", "2026-10-05", "psico-1"]],
+        cabecalho_extra=["campanha"],
+    )
+    resultado = ra.registrar_envios(planilha, diretorio_registro=diretorio, opcoes_funil=_OPCOES_FUNIL)
+    assert resultado == {"acrescentados": 1, "ja_existentes": 1, "backup": resultado["backup"]}
+
+    wb = load_workbook(ra.caminho_registro(diretorio))
+    cabecalho = [c.value for c in wb.active[1]]
+    assert cabecalho == cabecalho_antigo + list(ra.COLUNAS_CAMPANHA_REGISTRO)
+    linhas = list(wb.active.iter_rows(min_row=2, values_only=True))
+    assert list(linhas[0][: len(cabecalho_antigo)]) == [v if v != "" else None for v in linha_antiga]
+    assert dict(zip(cabecalho, linhas[1]))["campanha"] == "psico-1"
+
+
+def test_funil_real_tem_pediu_exemplo_logo_depois_de_resposta_positiva_e_etapa_inalterada():
+    opcoes = ra.carregar_opcoes_funil()
+    resultado = opcoes["resultado"]
+    assert resultado.count("pediu exemplo") == 1
+    assert resultado.index("pediu exemplo") == resultado.index("resposta positiva") + 1
+    assert opcoes["etapa"] == ["1º contato", "follow-up 1", "follow-up 2"]

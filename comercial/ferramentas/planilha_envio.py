@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 import re
 import sys
@@ -79,7 +80,20 @@ _RE_PROFISSIONAL = re.compile(r"^\s*(?:dr\.?|dra\.?|doctor|doctora)\b", re.IGNOR
 COLUNAS_CSV_HUMANO = (
     "pista", "motivo", "nome", "nicho", "cidade", "telefone", "email", "instagram", "site",
     "classe_site", "avaliacoes", "nota", "google_maps_url", "place_id",
+    # 15-19: acrescentadas pelo QUALIFICADOR no contrato 2.2.0 (EQC/contracts/CONTRACT.md,
+    # seção do CSV humano). CSV humano anterior não as tem -- ver `_campos_campanha_geral`.
+    "campanha_id", "campanha_nicho", "possivel_mesmo_negocio", "prioridade_rotulo", "prioridade_score",
 )
+
+# Valor do contrato para "não sabemos" -- nunca inventado, nunca convertido em deficiência.
+NAO_VERIFICADO = "NAO_VERIFICADO"
+
+# Canais de abordagem ativos (Etapa 2, diretor, 04-05/10/2026): só WhatsApp no
+# primeiro teste de campo. A lista vive em config/canais.json -- religar o e-mail
+# é editar a config, nunca o código.
+_CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
+CAMINHO_CANAIS_PADRAO = _CONFIG_DIR / "canais.json"
+CANAIS_CONHECIDOS = ("whatsapp", "email")
 
 # "Respondeu" (livre) virou o funil estruturado (Etapa/Resultado/Mensagem/
 # Motivo da edição/Decidi não enviar/Motivo de não enviar) -- decisão do
@@ -99,7 +113,8 @@ COLUNAS_DIRETOR = (
 # "place_id" é o identificador padrão de todo lead, em TODA aba de leads
 # (decisão do diretor, 25/09/2026, defeito grave: a Nata não tinha essa
 # coluna -- registro_abordagens._linhas_enviadas pulava a aba em silêncio,
-# e nenhum envio dela seria registrado). Sempre por último, sempre
+# e nenhum envio dela seria registrado). Última coluna até a Etapa 2 (as
+# colunas de campanha vieram depois dela, ver `COLUNAS_CAMPANHA`); sempre
 # preenchida -- gerar_planilha recusa gravar qualquer linha sem ela
 # (PlaceIdAusenteError). Oculta na planilha (_escrever_aba) -- é para o
 # programa, não para o diretor editar.
@@ -108,18 +123,27 @@ COLUNAS_DIRETOR = (
 # 25/09/2026, especificação final do MVP): com a mensagem sugerida, quando
 # houver; senão, link de conversa vazia (quando há celular válido). A coluna
 # "Abrir conversa" saiu -- duplicava o mesmo link.
+#
+# Etapa 2 (diretor, 04-05/10/2026): `COLUNAS_CAMPANHA` entram no FIM das duas
+# abas, depois de `place_id` -- nenhuma coluna existente muda de posição.
+# "nicho" aqui é o nicho DA CAMPANHA (`campanha_nicho`), não a categoria do
+# Google; "prioridade_*" são a prioridade da Onda 1 como veio do QUALIFICADOR,
+# NÃO autoritativa (aviso na aba "Como usar"). Os mesmos nomes são lidos por
+# `registro_abordagens.py`.
+COLUNAS_CAMPANHA = ("campanha", "nicho", "prioridade_rotulo", "prioridade_score")
+
 COLUNAS_GERAL = (
     "pista", "motivo", "nome", "cidade", "telefone", "WhatsApp", "email", "Abrir e-mail", "Canal",
     "instagram", "site", "classe_site", "avaliacoes", "nota", "google_maps_url",
     "Ângulo", "Mensagem sugerida", "Profissional detectado", "Captura",
-) + COLUNAS_DIRETOR + ("Aviso", "Contexto para IA", "place_id")
+) + COLUNAS_DIRETOR + ("Aviso", "Contexto para IA", "place_id") + COLUNAS_CAMPANHA
 
 COLUNAS_NATA = (
     "pista", "nome", "telefone", "WhatsApp", "email", "Abrir e-mail", "Canal",
     "problema vendável", "Ângulo", "mensagem", "Status",
     "conferir_antes_de_enviar", "Profissional detectado", "Captura",
     "site", "google_maps_url", "texto_site",
-) + COLUNAS_DIRETOR + ("Aviso", "Contexto para IA", "place_id")
+) + COLUNAS_DIRETOR + ("Aviso", "Contexto para IA", "place_id") + COLUNAS_CAMPANHA
 
 STATUS_SEM_MENSAGEM = "sem mensagem gerada"
 # Lead com ângulo cuja mensagem não sai pronta (nome sem corte seguro, setor
@@ -147,6 +171,22 @@ _COMO_USAR_TEXTO = (
         "negativa: \"No me interesa\", \"No necesito nada\". \"No contactar\" = pediu para não "
         "contatar. Nenhuma resposta = sem resposta.",
     ),
+    (
+        "Prioridade",
+        'As colunas "prioridade_rotulo" e "prioridade_score" vêm do QUALIFICADOR como vieram e NÃO são '
+        "autoritativas: servem só para ordenar a lista, nunca para aprovar ou descartar um lead. "
+        "Vazias = não há cálculo para aquela linha.",
+    ),
+    (
+        "Campanha e nicho",
+        '"campanha" e "nicho" são a campanha ativa no momento em que o lead foi importado (o nicho da '
+        'campanha, não a categoria do Google). "NAO_VERIFICADO" = lead importado antes da campanha existir.',
+    ),
+    (
+        "Canal",
+        'Neste teste o único canal é o WhatsApp (celular espanhol). Sem celular = "para depois", mesmo '
+        "com e-mail -- o e-mail aparece só como dado.",
+    ),
 )
 
 
@@ -161,6 +201,19 @@ class PlaceIdAusenteError(Exception):
     já abordados -- uma linha sem ele nunca é gravada; a planilha inteira
     falha, com o nome da aba e as linhas afetadas, em vez de gerar uma
     planilha incompleta em silêncio."""
+
+
+class ConfigCanaisInvalidaError(Exception):
+    """`config/canais.json` ausente, ilegível ou com canal desconhecido."""
+
+
+class ConsolidadaCabecalhoDivergenteError(Exception):
+    """A planilha consolidada existente tem um cabeçalho diferente das colunas
+    atuais (`COLUNAS_GERAL`/`COLUNAS_NATA`). A consolidada é acrescentada por
+    POSIÇÃO de coluna: gravar sobre um cabeçalho antigo poria cada valor na
+    coluna errada. Recusado sem salvar nada -- não há migração automática; a
+    consolidada é recriada do zero (decisão do diretor, 05/10/2026: backup
+    conferido por hash e arquivo novo)."""
 
 
 class LinkInconsistenteError(Exception):
@@ -313,17 +366,75 @@ def place_ids_ja_abordados(caminho_registro: Optional[Path] = None) -> set:
 # --- Canal (decisão do diretor, 24/09/2026, quinta rodada) ------------------
 
 
-def determinar_canal(telefone: Optional[str], email: Optional[str]) -> str:
-    """`"whatsapp"` (celular espanhol válido, 6/7) tem prioridade; senão
-    `"email"` quando há e-mail; senão `"para depois"` (nenhum canal de
-    contato direto). Celular presente: só WhatsApp é usado, mesmo com
-    e-mail também disponível -- "Sem celular e com e-mail => só 'Abrir
-    e-mail'" implica a mesma exclusividade no sentido contrário."""
-    if whatsapp_utils.normalizar_movel_espanhol(telefone):
+def carregar_canais_ativos(caminho: Path = CAMINHO_CANAIS_PADRAO) -> tuple:
+    """`canais_ativos` de `config/canais.json`: lista não vazia, só com canais
+    de `CANAIS_CONHECIDOS`. Fora disso, `ConfigCanaisInvalidaError` -- nunca
+    um default silencioso."""
+    caminho = Path(caminho)
+    try:
+        config = json.loads(caminho.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        raise ConfigCanaisInvalidaError(f"Config de canais ilegível em {caminho}: {e}") from e
+    canais = config.get("canais_ativos") if isinstance(config, dict) else None
+    if not isinstance(canais, list) or not canais:
+        raise ConfigCanaisInvalidaError(f"Config de canais em {caminho} sem 'canais_ativos' (lista não vazia).")
+    desconhecidos = [c for c in canais if c not in CANAIS_CONHECIDOS]
+    if desconhecidos:
+        raise ConfigCanaisInvalidaError(
+            f"Config de canais em {caminho}: canal(is) desconhecido(s) {desconhecidos}; "
+            f"aceitos: {list(CANAIS_CONHECIDOS)}."
+        )
+    return tuple(canais)
+
+
+def determinar_canal(telefone: Optional[str], email: Optional[str], canais_ativos: Optional[tuple] = None) -> str:
+    """Canal de abordagem do lead, restrito a `canais_ativos` (omitido = lê
+    `config/canais.json`). `"whatsapp"` (celular espanhol válido, 6/7) tem
+    prioridade; `"email"` só quando o e-mail está ATIVO na config e há
+    e-mail; senão `"para depois"`. Número fixo nunca vira WhatsApp. No
+    primeiro teste de campo (Etapa 2) só o WhatsApp está ativo: sem celular =
+    "para depois", mesmo com e-mail."""
+    canais_ativos = canais_ativos if canais_ativos is not None else carregar_canais_ativos()
+    if "whatsapp" in canais_ativos and whatsapp_utils.normalizar_movel_espanhol(telefone):
         return "whatsapp"
-    if email:
+    if "email" in canais_ativos and email:
         return "email"
     return "para depois"
+
+
+# --- Campanha, nicho, prioridade e aviso de mesmo negócio (Etapa 2) -----------
+
+
+def _valor_csv(lead: dict, coluna: str, ausente: str) -> str:
+    """Valor de `coluna` no CSV humano, como veio. Coluna inexistente (CSV
+    anterior à 2.2.0) = `ausente` -- nunca inventado."""
+    if coluna not in lead or lead[coluna] is None:
+        return ausente
+    return str(lead[coluna]).strip()
+
+
+def _campos_campanha_geral(lead: dict) -> dict:
+    """Colunas `COLUNAS_CAMPANHA` da aba Geral, das colunas 15-19 do CSV humano.
+    Sem a coluna: campanha/nicho = NAO_VERIFICADO, prioridade = vazio (não há
+    cálculo -- mesma semântica da Onda 2 no contrato)."""
+    return {
+        "campanha": _valor_csv(lead, "campanha_id", NAO_VERIFICADO),
+        "nicho": _valor_csv(lead, "campanha_nicho", NAO_VERIFICADO),
+        "prioridade_rotulo": _valor_csv(lead, "prioridade_rotulo", ""),
+        "prioridade_score": _valor_csv(lead, "prioridade_score", ""),
+    }
+
+
+def aviso_possivel_mesmo_negocio(valor: Optional[str]) -> str:
+    """Texto para a coluna `Aviso` quando o QUALIFICADOR marcou outra ficha
+    como possível mesmo negócio (place_id(s) separados por vírgula). Vazio
+    (checado sem par), ausente ou NAO_VERIFICADO = sem aviso -- não medido
+    não vira problema."""
+    valor = (valor or "").strip()
+    if not valor or valor == NAO_VERIFICADO:
+        return ""
+    outros = ", ".join(p.strip() for p in valor.split(",") if p.strip())
+    return f"possível mesmo negócio de outra ficha (place_id: {outros}) -- conferir antes de enviar"
 
 
 # --- Profissional detectado (decisão do diretor, 24/09/2026, quinta rodada) -
@@ -416,16 +527,21 @@ def montar_contexto_ia_geral(linha: dict) -> str:
 
 def _linha_geral(
     lead: dict, *, apresentacao, config_validacao, assuntos_email, mensagens_angulo, diretorio_capturas,
-    regras_angulo: Optional[dict] = None,
+    regras_angulo: Optional[dict] = None, canais_ativos: Optional[tuple] = None,
 ) -> dict:
     telefone = lead.get("telefone")
     email = lead.get("email")
-    numero = whatsapp_utils.normalizar_movel_espanhol(telefone)
-    canal = determinar_canal(telefone, email)
+    canal = determinar_canal(telefone, email, canais_ativos)
+    # Link de WhatsApp só quando o canal é WhatsApp: nunca para número fixo nem
+    # com o canal desligado na config.
+    numero = whatsapp_utils.normalizar_movel_espanhol(telefone) if canal == "whatsapp" else None
 
     linha = dict(lead)
+    # "nicho" da planilha é o nicho da CAMPANHA; a categoria do Google (coluna
+    # "nicho" do CSV) continua em `lead` para o ângulo, mas não vira coluna.
+    linha.update(_campos_campanha_geral(lead))
     linha["Canal"] = canal
-    linha["Aviso"] = ""
+    linha["Aviso"] = aviso_possivel_mesmo_negocio(lead.get("possivel_mesmo_negocio"))
     linha["Mensagem sugerida"] = ""
     linha["Abrir e-mail"] = ""
     linha["Profissional detectado"] = profissional_detectado(lead.get("nome"))
@@ -439,15 +555,15 @@ def _linha_geral(
             )
         except angulo_mensagem.LinhaPedeRevisaoError as e:
             mensagem, entrada_derivada = None, None
-            linha["Aviso"] = str(e)
+            linha["Aviso"] = "; ".join(filter(None, [linha["Aviso"], str(e)]))
         resultado_validacao = None if mensagem is None else angulo_mensagem.validar_mensagem_angulo(
             mensagem, angulo, entrada_derivada, nome_negocio=lead.get("nome"), config_validacao=config_validacao,
-            palavras_genericas_nome=angulo_mensagem.palavras_genericas_nome(angulo_mensagem.carregar_cidade_busca()),
+            palavras_genericas_nome=angulo_mensagem.palavras_genericas_nome(angulo_mensagem.carregar_cidade_campanha()),
         )
         if resultado_validacao is None:
             pass
         elif not resultado_validacao.valido:
-            linha["Aviso"] = "; ".join(resultado_validacao.motivos)
+            linha["Aviso"] = "; ".join(filter(None, [linha["Aviso"], *resultado_validacao.motivos]))
         else:
             linha["Mensagem sugerida"] = mensagem
             if canal == "email":
@@ -473,6 +589,49 @@ def montar_linhas_geral(leads_csv: list, **kwargs) -> list:
 
 
 # --- Linhas da aba Nata (nata + candidatos_triagem) -------------------------
+
+
+def _texto_de_evidencia(campo) -> str:
+    """`CampoEvidencia` de texto do contrato 2.2.0 para a célula: valor quando
+    CONFIRMADO_PRESENTE; `NAO_VERIFICADO` quando não verificado (lead anterior
+    ao carimbo); vazio quando CONFIRMADO_AUSENTE. Nunca inventado."""
+    if campo.presente():
+        return str(campo.valor_confirmado)
+    if campo.nao_verificado():
+        return NAO_VERIFICADO
+    return ""
+
+
+def _campos_campanha_nata(lead) -> dict:
+    """Colunas `COLUNAS_CAMPANHA` da aba Nata, do contrato 2.2.0 (loader da 2A).
+    Prioridade = bloco `priorizacao_nao_autoritativa`, como veio: rótulo =
+    `priority_label` (Onda 2, a da Nata -- inclui `needs_review`) ou, se nulo,
+    `priority` (Onda 1); score = `priority_score`. Nulo = vazio. NÃO
+    autoritativa: só ordena, nunca aprova nem descarta (aviso em "Como usar")."""
+    prio = lead.priorizacao_nao_autoritativa
+    rotulo = prio.get("priority_label")
+    if rotulo is None:
+        rotulo = prio.get("priority")
+    score = prio.get("priority_score")
+    return {
+        "campanha": _texto_de_evidencia(lead.campanha_id),
+        "nicho": _texto_de_evidencia(lead.campanha_nicho),
+        "prioridade_rotulo": "" if rotulo is None else rotulo,
+        "prioridade_score": "" if score is None else score,
+    }
+
+
+def aviso_possivel_mesmo_negocio_contrato(campo) -> str:
+    """Mesmo aviso da aba Geral, a partir do `possivel_mesmo_negocio` do
+    contrato 2.2.0 (lista `{place_id, por, chave}` quando CONFIRMADO_PRESENTE).
+    CONFIRMADO_AUSENTE / NAO_VERIFICADO = sem aviso."""
+    if not campo.presente():
+        return ""
+    outros = [
+        f"{item.get('place_id') or '(sem place_id)'} por {item.get('por')}"
+        for item in (campo.valor_confirmado or [])
+    ]
+    return aviso_possivel_mesmo_negocio(", ".join(outros))
 
 
 def _campo_evidencia_ou_vazio(lead, chave1, chave2=None):
@@ -534,11 +693,12 @@ def montar_contexto_ia_nata(lead, angulo: str, mensagem: Optional[str]) -> str:
 def _linha_nata(
     lead, pista: str, leads_do_lote: list, *,
     apresentacao, config_validacao, assuntos_email, regras_angulo, mensagens_angulo, diretorio_capturas,
+    canais_ativos: Optional[tuple] = None,
 ) -> dict:
     telefone = _campo_evidencia_ou_vazio(lead, "contato", "telefone")
     email = _campo_evidencia_ou_vazio(lead, "contato", "email")
-    numero = whatsapp_utils.normalizar_movel_espanhol(telefone)
-    canal = determinar_canal(telefone, email)
+    canal = determinar_canal(telefone, email, canais_ativos)
+    numero = whatsapp_utils.normalizar_movel_espanhol(telefone) if canal == "whatsapp" else None
 
     linha = {
         "pista": pista,
@@ -559,10 +719,11 @@ def _linha_nata(
         "site": _campo_evidencia_ou_vazio(lead, "presenca_digital", "website_url"),
         "google_maps_url": lead["identidade"]["google_maps_url"] or "",
         "texto_site": entrada_estrategia.texto_do_site(lead) or "",
-        "Aviso": "",
+        "Aviso": aviso_possivel_mesmo_negocio_contrato(lead.possivel_mesmo_negocio),
     }
     for c in COLUNAS_DIRETOR:
         linha[c] = ""
+    linha.update(_campos_campanha_nata(lead))
 
     angulo = angulo_mensagem.escolher_angulo_nata(lead, leads_do_lote, regras_angulo)
     linha["Ângulo"] = angulo
@@ -578,19 +739,19 @@ def _linha_nata(
             )
         except angulo_mensagem.LinhaPedeRevisaoError as e:
             mensagem, entrada_derivada = None, None
-            linha["Aviso"] = str(e)
+            linha["Aviso"] = "; ".join(filter(None, [linha["Aviso"], str(e)]))
             linha["Status"] = STATUS_REVISAR
         resultado_validacao = None if mensagem is None else angulo_mensagem.validar_mensagem_angulo(
             mensagem, angulo, entrada_derivada, nome_negocio=lead["identidade"]["nome"],
             config_validacao=config_validacao,
             palavras_genericas_nome=angulo_mensagem.palavras_genericas_nome(
-                lead["identidade"]["nicho"], angulo_mensagem.carregar_cidade_busca(),
+                lead["identidade"]["nicho"], angulo_mensagem.carregar_cidade_campanha(),
             ),
         )
         if resultado_validacao is None:
             pass
         elif not resultado_validacao.valido:
-            linha["Aviso"] = "; ".join(resultado_validacao.motivos)
+            linha["Aviso"] = "; ".join(filter(None, [linha["Aviso"], *resultado_validacao.motivos]))
             linha["Status"] = STATUS_SEM_MENSAGEM
         else:
             linha["mensagem"] = mensagem
@@ -735,6 +896,29 @@ def _place_ids_na_aba(ws, colunas) -> set:
     }
 
 
+def _divergencia_cabecalho(nome_aba: str, ws, colunas, *, nova: bool) -> str:
+    """Descrição da divergência entre o cabeçalho de uma aba JÁ EXISTENTE e
+    `colunas`; vazio = igual (ou aba nova, que ainda vai receber o cabeçalho).
+    Não lê célula de aba nova (ler `ws.cell` materializa a linha -- ver
+    `_acrescentar_linhas`)."""
+    if nova:
+        return ""
+    atual = [c.value for c in ws[1]] if ws.max_row >= 1 else []
+    while atual and atual[-1] in (None, ""):
+        atual.pop()
+    if atual == list(colunas):
+        return ""
+    faltando = [c for c in colunas if c not in atual]
+    sobrando = [c for c in atual if c not in colunas]
+    return (
+        f'Aba "{nome_aba}": {len(atual)} coluna(s) no arquivo, {len(colunas)} esperada(s)'
+        + (f"; faltando {faltando}" if faltando else "")
+        + (f"; sobrando {sobrando}" if sobrando else "")
+        + ("; mesma lista em outra ordem" if not faltando and not sobrando else "")
+        + "."
+    )
+
+
 def atualizar_planilha_consolidada(
     *,
     linhas_geral: list,
@@ -776,6 +960,20 @@ def atualizar_planilha_consolidada(
         ws_geral = wb.create_sheet("Geral") if geral_nova else wb["Geral"]
         nata_nova = "Nata" not in wb.sheetnames
         ws_nata = wb.create_sheet("Nata") if nata_nova else wb["Nata"]
+
+        divergencias = [
+            d for d in (
+                _divergencia_cabecalho("Geral", ws_geral, COLUNAS_GERAL, nova=geral_nova),
+                _divergencia_cabecalho("Nata", ws_nata, COLUNAS_NATA, nova=nata_nova),
+            ) if d
+        ]
+        if divergencias:
+            raise ConsolidadaCabecalhoDivergenteError(
+                f"A planilha consolidada em {caminho} tem cabeçalho diferente das colunas atuais -- "
+                f"nada foi gravado nela (a consolidada grava por posição de coluna, e acrescentar "
+                f"poria valores na coluna errada). Não há migração automática: faça backup do arquivo, "
+                f"tire-o da pasta e rode de novo para recriá-la do zero.\n" + "\n".join(divergencias)
+            )
 
         ja_geral = _place_ids_na_aba(ws_geral, COLUNAS_GERAL)
         ja_nata = _place_ids_na_aba(ws_nata, COLUNAS_NATA)
@@ -842,6 +1040,7 @@ def gerar_planilha(
     mensagens_angulo: Optional[dict] = None,
     diretorio_capturas: Optional[Path] = None,
     consolidada_dir: Optional[Path] = None,
+    canais_ativos: Optional[tuple] = None,
 ) -> dict:
     """Gera `planilha_envio_<timestamp>.xlsx` (entrega interna, abas Geral,
     Nata e "Como usar") e atualiza a entrega CONSOLIDADA (fora do repo, só
@@ -866,6 +1065,7 @@ def gerar_planilha(
     regras_angulo = regras_angulo if regras_angulo is not None else angulo_mensagem.carregar_regras_angulo()
     mensagens_angulo = mensagens_angulo if mensagens_angulo is not None else angulo_mensagem.carregar_mensagens_angulo()
     diretorio_capturas = Path(diretorio_capturas) if diretorio_capturas else eqc.diretorio_capturas()
+    canais_ativos = canais_ativos if canais_ativos is not None else carregar_canais_ativos()
 
     caminho_csv = Path(caminho_csv_humano) if caminho_csv_humano else localizar_csv_humano_mais_recente()
     leads_csv = ler_csv_humano(caminho_csv)
@@ -882,7 +1082,7 @@ def gerar_planilha(
 
     kwargs_comuns = dict(
         apresentacao=apresentacao, config_validacao=config_validacao, assuntos_email=assuntos_email,
-        mensagens_angulo=mensagens_angulo, diretorio_capturas=diretorio_capturas,
+        mensagens_angulo=mensagens_angulo, diretorio_capturas=diretorio_capturas, canais_ativos=canais_ativos,
     )
 
     linhas_geral = montar_linhas_geral(leads_csv, regras_angulo=regras_angulo, **kwargs_comuns)
@@ -924,10 +1124,13 @@ def gerar_planilha(
     saida_dir.mkdir(parents=True, exist_ok=True)
     wb.save(caminho)
 
-    consolidada = atualizar_planilha_consolidada(
-        linhas_geral=linhas_geral, linhas_nata=linhas_nata, opcoes_funil=opcoes_funil,
-        diretorio=consolidada_dir,
-    )
+    try:
+        consolidada = atualizar_planilha_consolidada(
+            linhas_geral=linhas_geral, linhas_nata=linhas_nata, opcoes_funil=opcoes_funil,
+            diretorio=consolidada_dir,
+        )
+    except ConsolidadaCabecalhoDivergenteError as e:
+        raise ConsolidadaCabecalhoDivergenteError(f"Planilha interna gerada em {caminho}. {e}") from e
 
     return {
         "caminho": caminho,

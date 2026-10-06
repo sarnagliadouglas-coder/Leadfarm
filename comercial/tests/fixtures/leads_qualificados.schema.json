@@ -2,14 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://eqc.local/contracts/leads_qualificados.schema.json",
   "title": "Contrato QUALIFICADOR -> COMERCIAL",
-  "description": "Schema formal do JSON produzido pelo QUALIFICADOR e consumido pelo COMERCIAL. Versão 2.1.0 — acrescenta o campo opcional texto_site (MINOR, aditivo) sobre a base 2.0.0 (separa nata e candidatos_triagem e transporta sinais renderizados do site). Qualquer mudança no conjunto de chaves obrigatórias exige incrementar contract_version (semver).",
+  "description": "Schema formal do JSON produzido pelo QUALIFICADOR e consumido pelo COMERCIAL. Versão 2.2.0 — acrescenta por lead os campos obrigatórios campanha_id, campanha_nicho e possivel_mesmo_negocio, e por descartado campanha_id e campanha_nicho (carimbo da campanha ativa no import e aviso do filtro de redes), sobre a 2.1.0 (campo opcional texto_site) e a base 2.0.0 (separa nata e candidatos_triagem e transporta sinais renderizados do site). Qualquer mudança no conjunto de chaves obrigatórias exige incrementar contract_version (semver).",
   "type": "object",
   "required": ["contract_version", "schema_version", "generated_at", "stats", "nata", "candidatos_triagem", "descartados"],
   "additionalProperties": false,
   "properties": {
     "contract_version": {
       "type": "string",
-      "const": "2.1.0",
+      "const": "2.2.0",
       "description": "Versão do CONTRATO externo (o que o COMERCIAL deve checar). Muda só quando o conjunto de campos do payload muda."
     },
     "schema_version": {
@@ -55,6 +55,40 @@
       "description": "Estado de uma evidência coletada. CONFIRMADO_PRESENTE/AUSENTE = o dado foi checado e o valor é conhecido (presente ou ausente). NAO_VERIFICADO = a fonte que confirmaria esse dado não foi consultada (ex: deep-scrape não rodou para este lead)."
     },
 
+    "campo_texto_import": {
+      "type": "object",
+      "description": "Par valor/estado de um campo gravado pelo import (2.2.0). CONFIRMADO_PRESENTE com texto; CONFIRMADO_AUSENTE quando o lead tem o campo mas ele veio vazio (valor como gravado: \"\" ou null); NAO_VERIFICADO com null quando o lead é anterior ao campo.",
+      "required": ["valor", "estado"],
+      "additionalProperties": false,
+      "properties": {
+        "valor": { "type": ["string", "null"] },
+        "estado": { "$ref": "#/$defs/estado_evidencia" }
+      }
+    },
+
+    "campo_possivel_mesmo_negocio": {
+      "type": "object",
+      "description": "Adicionado em 2.2.0. Aviso do filtro de redes / multiunidade do QUALIFICADOR: a ficha divide telefone normalizado ou domínio do site próprio com outra(s) ficha(s) do pool, num grupo menor que o limiar de rede (hoje 2 fichas; 3 ou mais são descartadas com motivo rede_ou_multiunidade). CONFIRMADO_PRESENTE: valor lista as outras fichas. CONFIRMADO_AUSENTE (valor null): checado, sem par. NAO_VERIFICADO (valor null): lead importado antes do filtro. É aviso, não julgamento.",
+      "required": ["valor", "estado"],
+      "additionalProperties": false,
+      "properties": {
+        "valor": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "required": ["place_id", "por", "chave"],
+            "additionalProperties": false,
+            "properties": {
+              "place_id": { "type": ["string", "null"] },
+              "por": { "enum": ["telefone", "dominio"] },
+              "chave": { "type": "string" }
+            }
+          }
+        },
+        "estado": { "$ref": "#/$defs/estado_evidencia" }
+      }
+    },
+
     "campo_evidencia": {
       "type": "object",
       "description": "Par valor/estado. 'valor' pode ser null mesmo quando estado é CONFIRMADO_AUSENTE (ausência confirmada) ou NAO_VERIFICADO (não checado).",
@@ -89,7 +123,7 @@
       "type": "object",
       "required": [
         "place_id", "estagio_analise", "identidade", "contato", "classe_site",
-        "problema_vendavel",
+        "problema_vendavel", "campanha_id", "campanha_nicho", "possivel_mesmo_negocio",
         "reputacao", "presenca_digital", "gbp_diagnostico", "gbp_campos_crus",
         "evidencias_qualificador", "priorizacao", "analise_tecnica_site", "psi"
       ],
@@ -105,6 +139,16 @@
           "items": { "$ref": "#/$defs/problema_vendavel" }
         },
         "candidato_triagem_visual": { "$ref": "#/$defs/candidato_triagem_visual" },
+
+        "campanha_id": {
+          "$ref": "#/$defs/campo_texto_import",
+          "description": "Adicionado em 2.2.0. id da campanha ativa (EQC/config/campanha_ativa.json) no momento em que o lead foi importado; nunca re-carimbado. NAO_VERIFICADO (valor null) em lead importado antes de 2.2.0."
+        },
+        "campanha_nicho": {
+          "$ref": "#/$defs/campo_texto_import",
+          "description": "Adicionado em 2.2.0. Rótulo humano do nicho da campanha ativa no import (campo 'nicho' da campanha). NAO_VERIFICADO (valor null) em lead importado antes de 2.2.0."
+        },
+        "possivel_mesmo_negocio": { "$ref": "#/$defs/campo_possivel_mesmo_negocio" },
 
         "estagio_analise": {
           "type": "string",
@@ -350,10 +394,18 @@
 
     "descartado": {
       "type": "object",
-      "required": ["place_id", "identidade", "motivo", "campos_do_corte"],
+      "required": ["place_id", "identidade", "motivo", "campos_do_corte", "campanha_id", "campanha_nicho"],
       "additionalProperties": false,
       "properties": {
         "place_id": { "type": ["string", "null"] },
+        "campanha_id": {
+          "$ref": "#/$defs/campo_texto_import",
+          "description": "Adicionado em 2.2.0. Campanha ativa no import do lead descartado; NAO_VERIFICADO (null) se anterior a 2.2.0."
+        },
+        "campanha_nicho": {
+          "$ref": "#/$defs/campo_texto_import",
+          "description": "Adicionado em 2.2.0. Nicho da campanha ativa no import do lead descartado; NAO_VERIFICADO (null) se anterior a 2.2.0."
+        },
         "identidade": {
           "type": "object",
           "required": ["nome", "nicho", "cidade"],
@@ -366,11 +418,11 @@
         },
         "motivo": {
           "type": "string",
-          "description": "rejection_reason: large_organization | no_contact_no_signal | icp_* | sem_canal_de_contato | qualification_declined (lista pode crescer — não é enum fechado no schema para não quebrar em cada motivo novo)."
+          "description": "rejection_reason: large_organization | no_contact_no_signal | icp_* | sem_canal_de_contato | qualification_declined | rede_ou_multiunidade (2.2.0) | linha_deslocada_irrecuperavel (2.2.0) (lista pode crescer — não é enum fechado no schema para não quebrar em cada motivo novo)."
         },
         "campos_do_corte": {
           "type": "object",
-          "description": "Varia por motivo — os campos concretos que motivaram o corte."
+          "description": "Varia por motivo — os campos concretos que motivaram o corte. A partir de 2.2.0 pode trazer detalhe_do_corte ({valor, estado}) com o detalhe gravado no import: a categoria que causou o corte de campanha (icp_categoria_*), o grupo de rede (por, chave, tamanho_grupo) ou o padrão de linha deslocada."
         }
       }
     }

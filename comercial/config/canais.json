@@ -1,0 +1,5 @@
+{
+  "_anotado_em": "2026-10-05",
+  "_nota": "Canais de abordagem ativos na planilha de envio (planilha_envio.determinar_canal). Primeiro teste de campo (diretor, 04-05/10/2026): so WhatsApp -- celular espanhol (6/7) vira 'whatsapp'; qualquer outro caso vira 'para depois', mesmo com e-mail. O e-mail continua na planilha como dado, sem link mailto. Valores aceitos: 'whatsapp', 'email' (whatsapp sempre tem prioridade quando os dois estao ativos). Para religar o e-mail, acrescente 'email' a lista; nenhum codigo muda. Editar aqui, nunca no codigo.",
+  "canais_ativos": ["whatsapp"]
+}

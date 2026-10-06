@@ -60,10 +60,18 @@ COLUNAS_FUNIL = ("Etapa", "Resultado", "Enviada como", "Motivo da edição", "De
 # planilha de envio não tem mais essa coluna (`planilha_envio.py` não gera
 # "Variante" -- `_valor(linha, "Variante")`, abaixo, já resolve para "" nesse
 # caso, sem erro). Não usar "variante" vazio como sinal de erro.
+#
+# Etapa 2 (diretor, 04-05/10/2026): `COLUNAS_CAMPANHA_REGISTRO` no FIM, no
+# mesmo padrão -- lidas por NOME das colunas homônimas da planilha de envio
+# ("campanha", "nicho", "pista", "prioridade_rotulo", "prioridade_score";
+# ver planilha_envio.COLUNAS_CAMPANHA). Planilha sem a coluna = "". Registro
+# antigo ganha as colunas no fim do cabeçalho na próxima gravação.
+COLUNAS_CAMPANHA_REGISTRO = ("campanha", "nicho", "pista", "prioridade_rotulo", "prioridade_score")
+
 COLUNAS_REGISTRO = (
     "place_id", "nome", "telefone", "aba_origem", "enviado_em",
     "canal", "modelo", "custo_usd", "registrado_em",
-) + COLUNAS_FUNIL + ("angulo", "variante")
+) + COLUNAS_FUNIL + ("angulo", "variante") + COLUNAS_CAMPANHA_REGISTRO
 
 
 class ConfigFunilInvalidaError(Exception):
@@ -220,6 +228,7 @@ def _linhas_enviadas(caminho_planilha: Path) -> list:
                     "motivo_nao_enviar": _valor(linha, "Motivo de não enviar") or "",
                     "angulo": _valor(linha, "Ângulo") or "",
                     "variante": _valor(linha, "Variante") or "",
+                    **{c: _valor(linha, c) or "" for c in COLUNAS_CAMPANHA_REGISTRO},
                 })
 
         if erros:
@@ -257,7 +266,8 @@ def _place_ids_existentes(caminho: Path) -> set:
 def _garantir_cabecalho(ws) -> list:
     """Cabeçalho da aba do registro, com as colunas de `COLUNAS_REGISTRO`
     que faltarem ACRESCENTADAS NO FIM (registro criado antes de 27/09/2026
-    não tem "angulo"/"variante"). Nunca reordena nem remove coluna
+    não tem "angulo"/"variante"; antes da Etapa 2, não tem as colunas de
+    campanha). Nunca reordena nem remove coluna
     existente -- a escrita das linhas novas é por nome de coluna."""
     cabecalho = [c.value for c in ws[1]]
     for coluna in COLUNAS_REGISTRO:
@@ -322,6 +332,7 @@ def registrar_envios(
                 "Etapa": e["etapa"], "Resultado": e["resultado"], "Enviada como": e["mensagem_status"],
                 "Motivo da edição": e["motivo_edicao"], "Decidi não enviar": e["decidiu_nao_enviar"],
                 "Motivo de não enviar": e["motivo_nao_enviar"], "angulo": e["angulo"], "variante": e["variante"],
+                **{c: e[c] for c in COLUNAS_CAMPANHA_REGISTRO},
             }
             ws.append([valores.get(c, "") for c in cabecalho])
 

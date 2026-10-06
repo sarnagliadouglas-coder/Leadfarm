@@ -121,6 +121,8 @@ def _lead_nata(
     telefone_na_pagina=None, nota_estado="NAO_VERIFICADO", nota_valor=None,
     avaliacoes_estado="NAO_VERIFICADO", avaliacoes_valor=None, lcp_ms=None, psi_estado="NAO_VERIFICADO",
     rodadas=2, texto_site=None, fora_do_ar=False, classe_site="proprio",
+    campanha_id=("psicologos-teste", "CONFIRMADO_PRESENTE"), campanha_nicho=("Psicólogos", "CONFIRMADO_PRESENTE"),
+    possivel_mesmo_negocio=(None, "CONFIRMADO_AUSENTE"), priorizacao=None,
 ):
     problemas = []
     if fora_do_ar:
@@ -155,6 +157,15 @@ def _lead_nata(
              "truncado": False, "dispositivo": "mobile", "coletado_em": None}
             if texto_site else None
         ),
+        # contrato 2.2.0
+        "campanha_id": {"valor": campanha_id[0], "estado": campanha_id[1]},
+        "campanha_nicho": {"valor": campanha_nicho[0], "estado": campanha_nicho[1]},
+        "possivel_mesmo_negocio": {"valor": possivel_mesmo_negocio[0], "estado": possivel_mesmo_negocio[1]},
+        "priorizacao": priorizacao or {
+            "autoritativo": False, "commercial_fit_score": 50, "priority": None, "contactability": None,
+            "risks": None, "reasons": [], "website_opportunity_score": 40.0, "priority_score": 61.5,
+            "priority_label": "media", "lacunas_interpretadas": [],
+        },
     })
 
 
@@ -169,9 +180,41 @@ def test_canal_whatsapp_quando_celular():
     assert determinar_canal("600000101", "x@y.es") == "whatsapp"
 
 
-def test_canal_email_quando_sem_celular_com_email():
-    assert determinar_canal("", "x@y.es") == "email"
-    assert determinar_canal("912345678", "x@y.es") == "email"  # fixo não conta como celular
+def test_canal_so_whatsapp_sem_celular_com_email_fica_para_depois():
+    """Etapa 2 (diretor, 04-05/10/2026): só WhatsApp no teste de campo -- e-mail
+    não vira canal, nem com o fixo como único telefone (config real)."""
+    assert pe.carregar_canais_ativos() == ("whatsapp",)
+    assert determinar_canal("", "x@y.es") == "para depois"
+    assert determinar_canal("912345678", "x@y.es") == "para depois"  # fixo não conta como celular
+
+
+def test_canal_email_religado_pela_config_sem_mudar_codigo():
+    """Controle negativo: com "email" ativo na config, o comportamento antigo volta."""
+    ativos = ("whatsapp", "email")
+    assert determinar_canal("", "x@y.es", ativos) == "email"
+    assert determinar_canal("912345678", "x@y.es", ativos) == "email"
+    assert determinar_canal("600000101", "x@y.es", ativos) == "whatsapp"
+
+
+def test_canal_whatsapp_desligado_na_config_nunca_gera_whatsapp():
+    assert determinar_canal("600000101", "", ("email",)) == "para depois"
+
+
+@pytest.mark.parametrize("conteudo,trecho", [
+    ({"canais_ativos": []}, "lista não vazia"),
+    ({}, "canais_ativos"),
+    ({"canais_ativos": ["whatsapp", "telegram"]}, "desconhecido"),
+])
+def test_config_de_canais_invalida_levanta(tmp_path, conteudo, trecho):
+    caminho = tmp_path / "canais.json"
+    caminho.write_text(json.dumps(conteudo), encoding="utf-8")
+    with pytest.raises(pe.ConfigCanaisInvalidaError, match=trecho):
+        pe.carregar_canais_ativos(caminho)
+
+
+def test_config_de_canais_ausente_levanta(tmp_path):
+    with pytest.raises(pe.ConfigCanaisInvalidaError):
+        pe.carregar_canais_ativos(tmp_path / "nao-existe.json")
 
 
 def test_canal_para_depois_quando_nenhum():
@@ -468,12 +511,48 @@ def test_linha_geral_canal_whatsapp_sem_mensagem_valida_usa_conversa_vazia(tmp_p
     assert "text=" not in linha["WhatsApp"]
 
 
-def test_linha_geral_canal_email_preenche_abrir_email_nao_whatsapp(tmp_path):
+def test_linha_geral_sem_celular_com_email_fica_para_depois_e_email_so_como_dado(tmp_path):
+    """Etapa 2: só WhatsApp -- o e-mail fica visível como dado, sem link mailto."""
     linhas = montar_linhas_geral([_linha_csv(telefone="", email="x@y.es")], **_kwargs_comuns(tmp_path))
+    linha = linhas[0]
+    assert linha["Canal"] == "para depois"
+    assert linha["email"] == "x@y.es"
+    assert linha["Abrir e-mail"] == ""
+    assert linha["WhatsApp"] == ""
+
+
+def test_linha_geral_canal_email_religado_preenche_abrir_email(tmp_path):
+    """Controle negativo: com "email" ativo, o mailto volta (prova que a regra é a config)."""
+    linhas = montar_linhas_geral(
+        [_linha_csv(telefone="", email="x@y.es")], canais_ativos=("whatsapp", "email"), **_kwargs_comuns(tmp_path),
+    )
     linha = linhas[0]
     assert linha["Canal"] == "email"
     assert linha["Abrir e-mail"].startswith("mailto:x@y.es")
     assert linha["WhatsApp"] == ""
+
+
+def test_linha_geral_numero_fixo_nunca_ganha_link_de_whatsapp(tmp_path):
+    linhas = montar_linhas_geral([_linha_csv(telefone="965123456", email="x@y.es")], **_kwargs_comuns(tmp_path))
+    linha = linhas[0]
+    assert linha["Canal"] == "para depois"
+    assert linha["WhatsApp"] == ""
+    assert linha["Abrir e-mail"] == ""
+    # controle: o celular ganha link
+    celular = montar_linhas_geral([_linha_csv(telefone="600000101")], **_kwargs_comuns(tmp_path))[0]
+    assert celular["WhatsApp"].startswith("https://wa.me/34600000101")
+
+
+def test_linha_nata_sem_celular_com_email_fica_para_depois_sem_mailto(tmp_path):
+    for telefone in ("", "965123456"):
+        linha = montar_linhas_nata(
+            [_lead_nata(telefone=telefone, email="x@y.es", lcp_ms=12000, psi_estado="CONFIRMADO_PRESENTE")],
+            [], [], regras_angulo=_REGRAS_ANGULO, **_kwargs_comuns(tmp_path),
+        )[0]
+        assert linha["Canal"] == "para depois"
+        assert linha["email"] == "x@y.es"
+        assert linha["Abrir e-mail"] == ""
+        assert linha["WhatsApp"] == ""
 
 
 def test_linha_geral_canal_para_depois_sem_nenhum_link(tmp_path):
@@ -553,7 +632,7 @@ def test_linha_nata_nome_generico_de_nicho_e_cidade_nao_e_falso_positivo(tmp_pat
     Alicante - Pedro Ficticio" (nome limpo "Psicólogo en Alicante", só
     palavras genéricas) não pode ter a mensagem rejeitada só porque o
     modelo de poucas_avaliacoes legitimamente cita "quien busca psicólogo
-    en Alicante" -- usa config/cidade_da_busca.json real (Alicante)."""
+    en Alicante" -- cidade da campanha de teste (Alicante, tests/conftest.py)."""
     lead = _lead_nata(
         place_id="p1", nome="Psicólogo en Alicante - Pedro Ficticio", nicho="Psicólogo",
         nota_estado="CONFIRMADO_PRESENTE", nota_valor=4.8,
@@ -1221,7 +1300,7 @@ def _kwargs_reais(diretorio_capturas):
 
 
 def test_linha_nata_nome_inseguro_fica_sem_mensagem_e_marcada_para_revisar(tmp_path, monkeypatch):
-    monkeypatch.setattr(am, "carregar_cidade_busca", lambda *a, **k: "Alicante")
+    monkeypatch.setattr(am, "carregar_cidade_campanha", lambda *a, **k: "Alicante")
     lead = _lead_nata(nome="Clínica Dental Ficticia 🦷 Su Sonrisa", nicho="Clínica dental", lcp_ms=12000,
                       psi_estado="CONFIRMADO_PRESENTE", rodadas=2)
     linha = montar_linhas_nata(
@@ -1235,7 +1314,7 @@ def test_linha_nata_nome_inseguro_fica_sem_mensagem_e_marcada_para_revisar(tmp_p
 
 
 def test_linha_nata_nome_limpo_sai_com_mensagem_nova(tmp_path, monkeypatch):
-    monkeypatch.setattr(am, "carregar_cidade_busca", lambda *a, **k: "Alicante")
+    monkeypatch.setattr(am, "carregar_cidade_campanha", lambda *a, **k: "Alicante")
     lead = _lead_nata(nome="Dental Brisa - Clínica Dental en Alicante", nicho="Clínica dental", lcp_ms=12000,
                       psi_estado="CONFIRMADO_PRESENTE", rodadas=2)
     linha = montar_linhas_nata(
@@ -1261,3 +1340,297 @@ def test_linha_geral_sem_site_saude_sai_com_mensagem_nova(tmp_path):
     )[0]
     assert "se nota que sus pacientes están contentos" in linha["Mensagem sugerida"]
     assert "REVISAR" not in linha["Aviso"]
+
+
+
+# --- Etapa 2 (diretor, 04-05/10/2026): campanha, nicho, prioridade, aviso, canal --
+
+
+# Listas LITERAIS das colunas de antes da Etapa 2 (commit 0eb15d2,
+# comercial/ferramentas/planilha_envio.py) -- nunca derivadas da lista atual,
+# para que uma coluna inserida no meio derrube o teste.
+_DIRETOR_ANTES_DA_ETAPA_2 = (
+    "Data 1º contato", "Próximo contato",
+    "Etapa", "Resultado", "Enviada como", "Motivo da edição", "Decidi não enviar", "Motivo de não enviar",
+    "Follow-up em", "Observação",
+)
+_COLUNAS_GERAL_ANTES_DA_ETAPA_2 = (
+    "pista", "motivo", "nome", "cidade", "telefone", "WhatsApp", "email", "Abrir e-mail", "Canal",
+    "instagram", "site", "classe_site", "avaliacoes", "nota", "google_maps_url",
+    "Ângulo", "Mensagem sugerida", "Profissional detectado", "Captura",
+) + _DIRETOR_ANTES_DA_ETAPA_2 + ("Aviso", "Contexto para IA", "place_id")
+_COLUNAS_NATA_ANTES_DA_ETAPA_2 = (
+    "pista", "nome", "telefone", "WhatsApp", "email", "Abrir e-mail", "Canal",
+    "problema vendável", "Ângulo", "mensagem", "Status",
+    "conferir_antes_de_enviar", "Profissional detectado", "Captura",
+    "site", "google_maps_url", "texto_site",
+) + _DIRETOR_ANTES_DA_ETAPA_2 + ("Aviso", "Contexto para IA", "place_id")
+_COLUNAS_CAMPANHA_ETAPA_2 = ("campanha", "nicho", "prioridade_rotulo", "prioridade_score")
+
+
+def _so_acrescentou_no_fim(atuais, antigas, novas) -> bool:
+    return tuple(atuais) == tuple(antigas) + tuple(novas)
+
+
+def test_colunas_de_campanha_no_fim_das_duas_abas_sem_mexer_nas_antigas():
+    assert pe.COLUNAS_CAMPANHA == _COLUNAS_CAMPANHA_ETAPA_2
+    assert _so_acrescentou_no_fim(COLUNAS_GERAL, _COLUNAS_GERAL_ANTES_DA_ETAPA_2, _COLUNAS_CAMPANHA_ETAPA_2)
+    assert _so_acrescentou_no_fim(COLUNAS_NATA, _COLUNAS_NATA_ANTES_DA_ETAPA_2, _COLUNAS_CAMPANHA_ETAPA_2)
+    assert COLUNAS_GERAL[0] == "pista" and COLUNAS_NATA[0] == "pista"
+
+
+@pytest.mark.parametrize("posicao", [0, 5, 20, 29])
+def test_ordem_das_colunas_controle_negativo_coluna_no_meio_e_pega(posicao):
+    """Controle negativo: a mesma checagem recusa uma coluna inserida no meio
+    (ou trocada de lugar), não só uma que falte."""
+    inserida = list(COLUNAS_GERAL)
+    inserida.insert(posicao, "coluna_intrusa")
+    assert not _so_acrescentou_no_fim(inserida, _COLUNAS_GERAL_ANTES_DA_ETAPA_2, _COLUNAS_CAMPANHA_ETAPA_2)
+    trocada = list(COLUNAS_NATA)
+    trocada[posicao], trocada[posicao + 1] = trocada[posicao + 1], trocada[posicao]
+    assert not _so_acrescentou_no_fim(trocada, _COLUNAS_NATA_ANTES_DA_ETAPA_2, _COLUNAS_CAMPANHA_ETAPA_2)
+
+
+def _linha_csv_22(**over):
+    """Linha do CSV humano 2.2.0 (19 colunas)."""
+    base = _linha_csv(
+        nicho="Psicólogo", campanha_id="psicologos-teste", campanha_nicho="Psicólogos",
+        possivel_mesmo_negocio="", prioridade_rotulo="alta", prioridade_score="72",
+    )
+    base.update(over)
+    return base
+
+
+def test_linha_geral_le_campanha_nicho_e_prioridade_do_csv_como_vieram(tmp_path):
+    linha = montar_linhas_geral([_linha_csv_22()], **_kwargs_comuns(tmp_path))[0]
+    assert linha["campanha"] == "psicologos-teste"
+    assert linha["nicho"] == "Psicólogos"  # nicho da campanha, não a categoria do Google
+    assert linha["prioridade_rotulo"] == "alta"
+    assert linha["prioridade_score"] == "72"
+    assert linha["pista"] == "direta"
+    assert "mesmo negócio" not in linha["Aviso"]
+
+
+def test_linha_geral_prioridade_vazia_da_onda_2_fica_vazia():
+    campos = pe._campos_campanha_geral(_linha_csv_22(prioridade_rotulo="", prioridade_score=""))
+    assert campos["prioridade_rotulo"] == "" and campos["prioridade_score"] == ""
+
+
+def test_linha_geral_csv_antigo_sem_colunas_novas_nao_inventa(tmp_path):
+    """CSV humano anterior à 2.2.0 (14 colunas): NAO_VERIFICADO / vazio, nunca um valor inventado."""
+    linha = montar_linhas_geral([_linha_csv(nicho="Psicólogo")], **_kwargs_comuns(tmp_path))[0]
+    assert linha["campanha"] == pe.NAO_VERIFICADO
+    assert linha["nicho"] == pe.NAO_VERIFICADO
+    assert linha["prioridade_rotulo"] == ""
+    assert linha["prioridade_score"] == ""
+    assert linha["Aviso"] == ""
+
+
+def test_linha_geral_possivel_mesmo_negocio_vai_para_o_aviso_com_o_place_id(tmp_path):
+    linha = montar_linhas_geral(
+        [_linha_csv_22(possivel_mesmo_negocio="ChIJ_outra_ficha")], **_kwargs_comuns(tmp_path),
+    )[0]
+    assert "possível mesmo negócio" in linha["Aviso"]
+    assert "ChIJ_outra_ficha" in linha["Aviso"]
+    assert linha["Mensagem sugerida"] != ""  # aviso, não julgamento: a mensagem continua
+
+
+@pytest.mark.parametrize("valor", ["", "NAO_VERIFICADO", None])
+def test_possivel_mesmo_negocio_sem_par_ou_nao_verificado_nao_gera_aviso(valor):
+    assert pe.aviso_possivel_mesmo_negocio(valor) == ""
+
+
+def test_aviso_possivel_mesmo_negocio_lista_varios_place_ids():
+    assert "p8, p9" in pe.aviso_possivel_mesmo_negocio("p8, p9")
+
+
+def test_aviso_mesmo_negocio_soma_com_o_aviso_de_revisao(tmp_path):
+    """O aviso do par não apaga o motivo de revisão da mensagem (e vice-versa)."""
+    linha = montar_linhas_geral(
+        [_linha_csv_22(possivel_mesmo_negocio="pX", nome="Constructora Sol", nicho="Constructora")],
+        regras_angulo=am.carregar_regras_angulo(), **_kwargs_reais(tmp_path),
+    )[0]
+    assert "pX" in linha["Aviso"]
+    assert "REVISAR SETOR" in linha["Aviso"]
+
+
+def _linha_nata_de(lead, tmp_path, pista_candidato=False):
+    nata, candidatos = ([], [lead]) if pista_candidato else ([lead], [])
+    return montar_linhas_nata(nata, candidatos, [], regras_angulo=_REGRAS_ANGULO, **_kwargs_comuns(tmp_path))[0]
+
+
+def test_linha_nata_le_campanha_nicho_e_prioridade_do_contrato_como_vieram(tmp_path):
+    linha = _linha_nata_de(_lead_nata(), tmp_path)
+    assert linha["campanha"] == "psicologos-teste"
+    assert linha["nicho"] == "Psicólogos"
+    assert linha["prioridade_rotulo"] == "media"  # priority_label (Onda 2)
+    assert linha["prioridade_score"] == 61.5
+    assert linha["pista"] == "nata"
+    assert _linha_nata_de(_lead_nata(), tmp_path, pista_candidato=True)["pista"] == "candidatos_triagem"
+
+
+def test_linha_nata_prioridade_needs_review_e_nulos_passam_como_vieram(tmp_path):
+    prio = {
+        "autoritativo": False, "commercial_fit_score": 10, "priority": None, "contactability": None, "risks": None,
+        "reasons": [], "website_opportunity_score": None, "priority_score": None, "priority_label": "needs_review",
+        "lacunas_interpretadas": None,
+    }
+    linha = _linha_nata_de(_lead_nata(priorizacao=prio), tmp_path)
+    assert linha["prioridade_rotulo"] == "needs_review"
+    assert linha["prioridade_score"] == ""
+    prio_onda1 = dict(prio, priority_label=None, priority="alta", priority_score=80)
+    linha = _linha_nata_de(_lead_nata(priorizacao=prio_onda1), tmp_path)
+    assert linha["prioridade_rotulo"] == "alta" and linha["prioridade_score"] == 80
+
+
+def test_linha_nata_campanha_nao_verificada_nunca_inventada(tmp_path):
+    linha = _linha_nata_de(_lead_nata(
+        campanha_id=(None, "NAO_VERIFICADO"), campanha_nicho=(None, "NAO_VERIFICADO"),
+        possivel_mesmo_negocio=(None, "NAO_VERIFICADO"),
+    ), tmp_path)
+    assert linha["campanha"] == pe.NAO_VERIFICADO
+    assert linha["nicho"] == pe.NAO_VERIFICADO
+    assert "mesmo negócio" not in linha["Aviso"]
+
+
+def test_linha_nata_possivel_mesmo_negocio_vai_para_o_aviso(tmp_path):
+    lead = _lead_nata(
+        possivel_mesmo_negocio=([{"place_id": "ChIJ_par", "por": "telefone", "chave": "600000101"}], "CONFIRMADO_PRESENTE"),
+        lcp_ms=12000, psi_estado="CONFIRMADO_PRESENTE",
+    )
+    linha = _linha_nata_de(lead, tmp_path)
+    assert "possível mesmo negócio" in linha["Aviso"]
+    assert "ChIJ_par por telefone" in linha["Aviso"]
+    assert linha["mensagem"] != ""  # aviso, não julgamento
+
+
+def test_linha_nata_sem_par_nao_gera_aviso(tmp_path):
+    """Controle negativo: CONFIRMADO_AUSENTE (checado, sem par) não gera aviso."""
+    assert "mesmo negócio" not in _linha_nata_de(_lead_nata(), tmp_path)["Aviso"]
+
+
+def test_linha_nata_aviso_do_par_soma_com_revisar_nome(tmp_path, monkeypatch):
+    monkeypatch.setattr(am, "carregar_cidade_campanha", lambda *a, **k: "Alicante")
+    lead = _lead_nata(
+        nome="Clínica Dental Ficticia 🦷 Su Sonrisa", nicho="Clínica dental", lcp_ms=12000,
+        psi_estado="CONFIRMADO_PRESENTE",
+        possivel_mesmo_negocio=([{"place_id": "pY", "por": "dominio", "chave": "x.es"}], "CONFIRMADO_PRESENTE"),
+    )
+    linha = montar_linhas_nata(
+        [lead], [], [], regras_angulo=am.carregar_regras_angulo(), **_kwargs_reais(tmp_path),
+    )[0]
+    assert "pY por dominio" in linha["Aviso"]
+    assert "REVISAR NOME" in linha["Aviso"]
+
+
+def test_como_usar_avisa_que_a_prioridade_nao_e_autoritativa():
+    textos = dict(pe._COMO_USAR_TEXTO)
+    assert "NÃO são autoritativas" in textos["Prioridade"]
+    assert "WhatsApp" in textos["Canal"]
+
+
+def test_gerar_planilha_so_whatsapp_nenhum_mailto_e_campanha_no_fim(tmp_path, monkeypatch):
+    import contrato_loader
+
+    caminho_csv = _csv_humano(tmp_path, [
+        _linha_csv_22(place_id="g1", telefone="", email="a@b.es"),
+        _linha_csv_22(place_id="g2", telefone="600000101", email="c@d.es", possivel_mesmo_negocio="g9"),
+    ])
+    monkeypatch.setattr(contrato_loader, "carregar_lote", lambda **kwargs: _lote_falso(
+        nata=[_lead_nata(place_id="n1", telefone="", email="e@f.es")],
+    ))
+    resultado = gerar_planilha(
+        caminho_csv_humano=caminho_csv, saida_dir=tmp_path / "_planilhas",
+        agora=datetime(2026, 10, 5, 9, 0, 0, tzinfo=timezone.utc), **_kwargs_gerar_planilha(tmp_path),
+    )
+    for caminho in (resultado["caminho"], resultado["consolidada"]["caminho"]):
+        wb = load_workbook(caminho)
+        for nome_aba in ("Geral", "Nata"):
+            for row in wb[nome_aba].iter_rows(min_row=1):
+                for cel in row:
+                    assert "mailto:" not in str(cel.value or "")
+                    assert not (cel.hyperlink and "mailto:" in (cel.hyperlink.target or ""))
+        geral = {r[COLUNAS_GERAL.index("place_id")]: dict(zip(COLUNAS_GERAL, r))
+                 for r in wb["Geral"].iter_rows(min_row=2, values_only=True)}
+        assert geral["g1"]["Canal"] == "para depois" and geral["g1"]["email"] == "a@b.es"
+        assert geral["g2"]["Canal"] == "whatsapp" and "g9" in geral["g2"]["Aviso"]
+        assert geral["g2"]["campanha"] == "psicologos-teste" and str(geral["g2"]["prioridade_score"]) == "72"
+        assert [c.value for c in wb["Geral"][1]] == list(COLUNAS_GERAL)
+        assert [c.value for c in wb["Nata"][1]] == list(COLUNAS_NATA)
+
+
+# --- Consolidada: cabeçalho antigo é recusado, nunca gravado por posição errada --
+
+
+def _consolidada_com_cabecalho(destino, colunas_geral, colunas_nata):
+    destino.mkdir(parents=True, exist_ok=True)
+    wb = Workbook()
+    wb.remove(wb.active)
+    for nome, colunas in (("Geral", colunas_geral), ("Nata", colunas_nata)):
+        ws = wb.create_sheet(nome)
+        ws.append(list(colunas))
+        ws.append(["x"] * len(colunas))
+    caminho = destino / pe.NOME_PLANILHA_CONSOLIDADA
+    wb.save(caminho)
+    return caminho
+
+
+def _sha256(caminho):
+    import hashlib
+
+    return hashlib.sha256(Path(caminho).read_bytes()).hexdigest()
+
+
+def test_consolidada_com_cabecalho_antigo_e_recusada_sem_gravar(tmp_path):
+    destino = tmp_path / "consolidada"
+    caminho = _consolidada_com_cabecalho(destino, _COLUNAS_GERAL_ANTES_DA_ETAPA_2, _COLUNAS_NATA_ANTES_DA_ETAPA_2)
+    antes = _sha256(caminho)
+    with pytest.raises(pe.ConsolidadaCabecalhoDivergenteError, match="faltando") as exc:
+        pe.atualizar_planilha_consolidada(
+            linhas_geral=[{"place_id": "g1", "nome": "Novo"}], linhas_nata=[], diretorio=destino,
+        )
+    assert "do zero" in str(exc.value)
+    assert _sha256(caminho) == antes
+
+
+def test_consolidada_com_colunas_em_outra_ordem_e_recusada(tmp_path):
+    destino = tmp_path / "consolidada"
+    trocada = list(COLUNAS_GERAL)
+    trocada[0], trocada[1] = trocada[1], trocada[0]
+    caminho = _consolidada_com_cabecalho(destino, trocada, COLUNAS_NATA)
+    antes = _sha256(caminho)
+    with pytest.raises(pe.ConsolidadaCabecalhoDivergenteError, match="outra ordem"):
+        pe.atualizar_planilha_consolidada(linhas_geral=[], linhas_nata=[], diretorio=destino)
+    assert _sha256(caminho) == antes
+
+
+def test_consolidada_com_cabecalho_atual_aceita_acrescentar(tmp_path):
+    """Controle negativo: cabeçalho igual às colunas atuais segue acrescentando."""
+    destino = tmp_path / "consolidada"
+    _consolidada_com_cabecalho(destino, COLUNAS_GERAL, COLUNAS_NATA)
+    resultado = pe.atualizar_planilha_consolidada(
+        linhas_geral=[{"place_id": "g1", "nome": "Novo", "campanha": "c1"}], linhas_nata=[], diretorio=destino,
+    )
+    assert resultado["novos_geral"] == 1
+    wb = load_workbook(resultado["caminho"])
+    ultima = [c.value for c in wb["Geral"][3]]
+    assert ultima[COLUNAS_GERAL.index("campanha")] == "c1"
+
+
+def test_gerar_planilha_com_consolidada_antiga_recusa_e_informa_a_interna(tmp_path, monkeypatch):
+    import contrato_loader
+
+    caminho_csv = _csv_humano(tmp_path, [_linha_csv_22()])
+    monkeypatch.setattr(contrato_loader, "carregar_lote", lambda **kwargs: _lote_falso())
+    consolidada_dir = tmp_path / "_consolidada"
+    caminho = _consolidada_com_cabecalho(
+        consolidada_dir, _COLUNAS_GERAL_ANTES_DA_ETAPA_2, _COLUNAS_NATA_ANTES_DA_ETAPA_2,
+    )
+    antes = _sha256(caminho)
+    with pytest.raises(pe.ConsolidadaCabecalhoDivergenteError, match="Planilha interna gerada em"):
+        gerar_planilha(
+            caminho_csv_humano=caminho_csv, saida_dir=tmp_path / "_planilhas",
+            agora=datetime(2026, 10, 5, 9, 0, 0, tzinfo=timezone.utc),
+            **_kwargs_gerar_planilha(tmp_path, consolidada_dir=consolidada_dir),
+        )
+    assert _sha256(caminho) == antes

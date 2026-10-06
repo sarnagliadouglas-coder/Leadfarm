@@ -87,12 +87,12 @@ except ModuleNotFoundError:  # pragma: no cover - bootstrap de sys.path
     import validador_mensagem
 
 import afirmacao
+import campanha
 from nome_comercial import nome_comercial_limpo
 
 _CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 CAMINHO_REGRAS_PADRAO = _CONFIG_DIR / "angulo_regras.json"
 CAMINHO_MENSAGENS_PADRAO = _CONFIG_DIR / "mensagens_angulo.json"
-CAMINHO_CIDADE_PADRAO = _CONFIG_DIR / "cidade_da_busca.json"
 CAMINHO_ABERTURAS_PADRAO = _CONFIG_DIR / "remetente_apresentacao.json"
 
 _CHAVES_REGRAS_OBRIGATORIAS = ("poucas_avaliacoes", "lentidao")
@@ -149,10 +149,6 @@ class ConfigAnguloInvalidaError(Exception):
 
 class ConfigMensagensAnguloInvalidaError(Exception):
     """`config/mensagens_angulo.json` ausente, ilegível ou incompleto."""
-
-
-class ConfigCidadeBuscaInvalidaError(Exception):
-    """`config/cidade_da_busca.json` ausente, ilegível ou incompleto."""
 
 
 class LinhaPedeRevisaoError(Exception):
@@ -280,21 +276,13 @@ def carregar_apresentacao(caminho: Path = CAMINHO_ABERTURAS_PADRAO) -> str:
     return texto
 
 
-def carregar_cidade_busca(caminho: Path = CAMINHO_CIDADE_PADRAO) -> str:
-    """Devolve a `cidade` configurada (pode ser vazia). O diretor edita este
-    arquivo à mão; usada em `{onde}` da mensagem de `poucas_avaliacoes`."""
-    caminho = Path(caminho)
-    try:
-        texto = caminho.read_text(encoding="utf-8")
-    except (FileNotFoundError, IsADirectoryError, PermissionError, OSError) as e:
-        raise ConfigCidadeBuscaInvalidaError(f"Config de cidade da busca não encontrada em {caminho}: {e}") from e
-    try:
-        config = json.loads(texto)
-    except json.JSONDecodeError as e:
-        raise ConfigCidadeBuscaInvalidaError(f"Config de cidade da busca em {caminho} não é JSON válido: {e}") from e
-    if "cidade" not in config:
-        raise ConfigCidadeBuscaInvalidaError(f"Config de cidade da busca em {caminho} sem a chave 'cidade'.")
-    return config["cidade"] or ""
+def carregar_cidade_campanha() -> str:
+    """Cidade da campanha ativa (`EQC/config/campanha_ativa.json`, lida por
+    `campanha.py` -- a mesma do QUALIFICADOR). Substitui
+    `config/cidade_da_busca.json`, aposentado na Etapa 2 (diretor, 04/10/2026).
+    Campanha ausente ou inválida levanta `campanha.CampanhaInvalidaError` --
+    falha alta, nunca uma cidade vazia em silêncio."""
+    return campanha.cidade_da_campanha()
 
 
 # --- preenchimento de placeholders ------------------------------------------
@@ -557,7 +545,7 @@ _CONECTORES_GENERICOS = {"en", "de", "del", "la", "el", "y", "e", "los", "las"}
 
 
 def _sem_cidade_no_fim(nome: str, cidade: str) -> str:
-    """Tira a cidade da busca do FIM do nome, com ou sem separador ("Alicante",
+    """Tira a cidade da campanha ativa do FIM do nome, com ou sem separador ("Alicante",
     "- Alicante", "| Alicante", "en Alicante"), sem diferenciar maiúsculas
     (decisão do diretor, 01/10/2026). Cidade no meio do nome não é tirada."""
     if not cidade:
@@ -580,16 +568,13 @@ def nome_curto_seguro(nome: Optional[str], regras: dict, nicho: Optional[str] = 
     Maps); separador sobrando; mais de `max_palavras`/`max_caracteres`;
     símbolo/emoji; só palavras genéricas (`nome_curto.palavras_genericas`,
     mais o nicho do lead) depois de tirar a cidade do fim; ou a cidade da
-    busca no MEIO do nome. A cidade no fim do nome é removida, não recusada
+    campanha no MEIO do nome. A cidade no fim do nome é removida, não recusada
     (diretor, 01/10/2026). Limites em `regras["nome_curto"]`."""
     cfg = regras.get("nome_curto") or {}
     max_palavras = cfg.get("max_palavras", 6)
     max_caracteres = cfg.get("max_caracteres", 45)
     limpo = (nome_comercial_limpo(nome) or "").strip()
-    try:
-        cidade = carregar_cidade_busca()
-    except ConfigCidadeBuscaInvalidaError:
-        cidade = ""
+    cidade = carregar_cidade_campanha()  # campanha inválida: falha alta, nunca cidade vazia
     limpo = _sem_cidade_no_fim(limpo, cidade)
     motivos = []
     if not limpo:
@@ -606,7 +591,7 @@ def nome_curto_seguro(nome: Optional[str], regras: dict, nicho: Optional[str] = 
         if any(unicodedata.category(c) in ("So", "Sk", "Cs", "Co") for c in limpo):
             motivos.append("símbolo/emoji no nome")
         if cidade and re.search(rf"\b{re.escape(_sem_acentos(cidade).lower())}\b", _sem_acentos(limpo).lower()):
-            motivos.append(f"cidade da busca ({cidade}) no nome")
+            motivos.append(f"cidade da campanha ({cidade}) no nome")
     if motivos:
         raise LinhaPedeRevisaoError(
             f"REVISAR NOME antes de enviar: {nome!r} não limpa com segurança ({'; '.join(motivos)})"
@@ -866,12 +851,12 @@ def montar_mensagem_direta(
 
 
 def palavras_genericas_nome(*frases: Optional[str]) -> list:
-    """Junta `frases` (nicho do lead, cidade da busca, ...) numa lista de
+    """Junta `frases` (nicho do lead, cidade da campanha, ...) numa lista de
     "palavras genéricas" para `validar_mensagem_angulo` -- um trecho do nome
     do lead formado SÓ por essas palavras (mais as conectoras fixas do
     validador) não é tratado como o nome do negócio vazando na mensagem
     (decisão do diretor, 25/09/2026, oitava rodada: "Psicólogo en Alicante"
-    -- nicho + cidade da busca -- é falso positivo quando o modelo de
+    -- nicho + cidade da campanha -- é falso positivo quando o modelo de
     `poucas_avaliacoes` legitimamente diz "quien busca psicólogo en
     Alicante"). `None`/vazio é ignorado."""
     return [f for f in frases if f]

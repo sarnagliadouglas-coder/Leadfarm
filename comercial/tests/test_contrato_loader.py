@@ -3,8 +3,8 @@ Testes do contrato_loader.
 
 Diferente da primeira versão destes testes, o schema usado aqui NÃO é
 inventado: é uma cópia vendorizada de `EQC\\contracts\\leads_qualificados.schema.json`
-(contrato 2.0.0 — separa `nata` e `candidatos_triagem`, ver Etapa D, passo
-D3/D4), guardada em `tests/fixtures/leads_qualificados.schema.json` para os
+(contrato 2.2.0 — campanha_id, campanha_nicho e possivel_mesmo_negocio
+por lead; ver CONTRACT.md, Histórico de versões), guardada em `tests/fixtures/leads_qualificados.schema.json` para os
 testes não dependerem do caminho pessoal de uma máquina específica. Se o
 contrato mudar de versão, essa cópia precisa ser atualizada junto —
 `test_fixture_do_schema_bate_com_o_contrato_instalado` avisa quando as duas
@@ -34,7 +34,7 @@ sys.path.insert(0, str(FERRAMENTAS_DIR))
 import contrato_loader as cl  # noqa: E402
 
 
-# --- Fixtures: documento válido no formato real do contrato 2.0.0 -------
+# --- Fixtures: documento válido no formato real do contrato 2.2.0 -------
 
 
 def _campo(valor: object, estado: str) -> dict:
@@ -48,6 +48,9 @@ def _lead_minimo() -> dict:
         "estagio_analise": "COMPLETO_SEM_SITE",
         "classe_site": "sem_site",
         "problema_vendavel": [],
+        "campanha_id": _campo("campanha-ficticia-01", cl.ESTADO_CONFIRMADO_PRESENTE),
+        "campanha_nicho": _campo("Fisioterapia ficticia", cl.ESTADO_CONFIRMADO_PRESENTE),
+        "possivel_mesmo_negocio": _campo(None, cl.ESTADO_CONFIRMADO_AUSENTE),
         "identidade": {
             "nome": "Fisioficticia Salud",
             "nicho": "Clínica de Fisioterapia",
@@ -207,6 +210,8 @@ def test_carrega_multiplos_leads_e_expoe_stats_e_descartados(entrada, schema_pat
             "identidade": {"nome": "Descartado Teste", "nicho": None, "cidade": None},
             "motivo": "sem_canal_de_contato",
             "campos_do_corte": {},
+            "campanha_id": _campo("campanha-ficticia-01", cl.ESTADO_CONFIRMADO_PRESENTE),
+            "campanha_nicho": _campo(None, cl.ESTADO_NAO_VERIFICADO),
         }
     ]
     doc["stats"]["descartados"] = 1
@@ -370,9 +375,164 @@ def test_versao_nao_suportada_e_subclasse_de_contrato_invalido(entrada, tmp_path
 
 def test_contract_version_real_e_a_esperada(schema_path):
     """Documenta a trava: a versão que o loader suporta é a do contrato vigente."""
-    assert cl.VERSAO_CONTRATO_SUPORTADA == "2.1.0"
+    assert cl.VERSAO_CONTRATO_SUPORTADA == "2.2.0"
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
     assert schema["properties"]["contract_version"]["const"] == cl.VERSAO_CONTRATO_SUPORTADA
+
+
+def _doc_com_versao(versao: str) -> dict:
+    doc = _documento_valido()
+    doc["contract_version"] = versao
+    return doc
+
+
+def test_lote_2_1_0_e_recusado_com_mensagem_clara_pelo_schema_real(entrada, schema_path):
+    """Controle negativo da trava: um lote 2.1.0 é recusado com a mensagem que
+    diz a versão do arquivo, a única versão entendida e que é preciso regerar
+    a saída no QUALIFICADOR."""
+    origem = _escrever(
+        entrada, "leads_qualificados_20261001-073020_v2.1.0.json", _doc_com_versao("2.1.0")
+    )
+
+    with pytest.raises(cl.VersaoContratoNaoSuportadaError) as exc:
+        cl.carregar_lote(caminho=origem, schema=schema_path)
+
+    msg = str(exc.value)
+    assert "2.1.0" in msg
+    assert "só entende '2.2.0'" in msg
+    assert "regerar" in msg and "QUALIFICADOR" in msg
+
+
+def test_lote_2_1_0_sem_campos_novos_tambem_e_recusado(entrada, schema_path):
+    """Um lote 2.1.0 de verdade (lead sem campanha_id etc.) cai na trava de
+    versão, não numa violação genérica de schema."""
+    doc = _doc_com_versao("2.1.0")
+    for chave in ("campanha_id", "campanha_nicho", "possivel_mesmo_negocio"):
+        del doc["nata"][0][chave]
+    origem = _escrever(entrada, "leads_qualificados_20261001-073020_v2.1.0.json", doc)
+
+    with pytest.raises(cl.VersaoContratoNaoSuportadaError, match="2.1.0"):
+        cl.carregar_lote(caminho=origem, schema=schema_path)
+
+
+def test_lote_2_2_0_e_aceito(entrada, schema_path):
+    """Controle positivo: o mesmo documento, em 2.2.0, carrega."""
+    origem = _escrever(
+        entrada, "leads_qualificados_20261005-100000_v2.2.0.json", _doc_com_versao("2.2.0")
+    )
+    lote = cl.carregar_lote(caminho=origem, schema=schema_path)
+    assert lote.contract_version == "2.2.0"
+    assert len(lote) == 1
+
+
+def test_lead_2_2_0_sem_campo_novo_obrigatorio_falha_alto(entrada, schema_path):
+    for chave in ("campanha_id", "campanha_nicho", "possivel_mesmo_negocio"):
+        doc = _documento_valido()
+        del doc["nata"][0][chave]
+        origem = _escrever(entrada, "leads_qualificados_20261005-100000_v2.2.0.json", doc)
+        with pytest.raises(cl.ContratoInvalidoError, match=chave):
+            cl.carregar_lote(caminho=origem, schema=schema_path)
+
+
+# --- Campos da 2.2.0: campanha e possivel_mesmo_negocio -------------------
+
+
+def test_campanha_presente_expoe_valor(entrada, schema_path):
+    origem = _escrever(
+        entrada, "leads_qualificados_20261005-100000_v2.2.0.json", _documento_valido()
+    )
+    lead = cl.carregar_lote(caminho=origem, schema=schema_path).leads[0]
+
+    assert isinstance(lead.campanha_id, cl.CampoEvidencia)
+    assert lead.campanha_id.presente()
+    assert lead.campanha_id.valor_confirmado == "campanha-ficticia-01"
+    assert lead.campanha_nicho.presente()
+    assert lead.campanha_nicho.valor_confirmado == "Fisioterapia ficticia"
+    # mesmo valor pelo acesso por índice
+    assert lead["campanha_id"] == lead.campanha_id
+
+
+def test_campanha_nao_verificada_em_lead_anterior_a_2_2_0(entrada, schema_path):
+    doc = _documento_valido()
+    doc["nata"][0]["campanha_id"] = _campo(None, cl.ESTADO_NAO_VERIFICADO)
+    doc["nata"][0]["campanha_nicho"] = _campo(None, cl.ESTADO_NAO_VERIFICADO)
+    origem = _escrever(entrada, "leads_qualificados_20261005-100000_v2.2.0.json", doc)
+    lead = cl.carregar_lote(caminho=origem, schema=schema_path).leads[0]
+
+    assert lead.campanha_id.nao_verificado()
+    assert not lead.campanha_id.confirmado_ausente()
+    with pytest.raises(cl.EvidenciaNaoConfirmadaError):
+        lead.campanha_id.valor_confirmado
+    assert lead.campanha_nicho.nao_verificado()
+
+
+def test_campanha_confirmado_ausente_e_distinto_de_nao_verificado(entrada, schema_path):
+    doc = _documento_valido()
+    doc["nata"][0]["campanha_id"] = _campo("", cl.ESTADO_CONFIRMADO_AUSENTE)
+    origem = _escrever(entrada, "leads_qualificados_20261005-100000_v2.2.0.json", doc)
+    lead = cl.carregar_lote(caminho=origem, schema=schema_path).leads[0]
+
+    assert lead.campanha_id.confirmado_ausente()
+    assert not lead.campanha_id.nao_verificado()
+    with pytest.raises(cl.EvidenciaNaoConfirmadaError):
+        lead.campanha_id.valor_confirmado
+
+
+def test_possivel_mesmo_negocio_presente_lista_as_outras_fichas(entrada, schema_path):
+    outras = [{"place_id": "ChIJFicticioLead00000000009", "por": "telefone", "chave": "600000999"}]
+    doc = _documento_valido()
+    doc["nata"][0]["possivel_mesmo_negocio"] = _campo(outras, cl.ESTADO_CONFIRMADO_PRESENTE)
+    origem = _escrever(entrada, "leads_qualificados_20261005-100000_v2.2.0.json", doc)
+    lead = cl.carregar_lote(caminho=origem, schema=schema_path).leads[0]
+
+    assert lead.possivel_mesmo_negocio.presente()
+    assert lead.possivel_mesmo_negocio.valor_confirmado == outras
+
+
+def test_possivel_mesmo_negocio_ausente_e_nao_verificado(entrada, schema_path):
+    doc = _documento_valido(
+        nata=[_lead_minimo()], candidatos_triagem=[_lead_candidato_triagem()]
+    )
+    doc["candidatos_triagem"][0]["possivel_mesmo_negocio"] = _campo(
+        None, cl.ESTADO_NAO_VERIFICADO
+    )
+    origem = _escrever(entrada, "leads_qualificados_20261005-100000_v2.2.0.json", doc)
+    lote = cl.carregar_lote(caminho=origem, schema=schema_path)
+
+    assert lote.nata[0].possivel_mesmo_negocio.confirmado_ausente()
+    assert lote.candidatos_triagem[0].possivel_mesmo_negocio.nao_verificado()
+
+
+def test_possivel_mesmo_negocio_com_forma_invalida_falha_alto(entrada, schema_path):
+    doc = _documento_valido()
+    doc["nata"][0]["possivel_mesmo_negocio"] = _campo(
+        [{"place_id": "x", "por": "email", "chave": "a"}], cl.ESTADO_CONFIRMADO_PRESENTE
+    )
+    origem = _escrever(entrada, "leads_qualificados_20261005-100000_v2.2.0.json", doc)
+    with pytest.raises(cl.ContratoInvalidoError):
+        cl.carregar_lote(caminho=origem, schema=schema_path)
+
+
+def test_campanha_do_descartado_expoe_os_dois_campos(entrada, schema_path):
+    doc = _documento_valido()
+    doc["descartados"] = [
+        {
+            "place_id": "ChIJFicticioLead00000000002",
+            "identidade": {"nome": "Descartado Teste", "nicho": None, "cidade": None},
+            "motivo": "rede_ou_multiunidade",
+            "campos_do_corte": {},
+            "campanha_id": _campo("campanha-ficticia-01", cl.ESTADO_CONFIRMADO_PRESENTE),
+            "campanha_nicho": _campo(None, cl.ESTADO_NAO_VERIFICADO),
+        }
+    ]
+    doc["stats"]["descartados"] = 1
+    origem = _escrever(entrada, "leads_qualificados_20261005-100000_v2.2.0.json", doc)
+    lote = cl.carregar_lote(caminho=origem, schema=schema_path)
+
+    camp = cl.campanha_do_descartado(lote.descartados[0])
+    assert camp["campanha_id"].presente()
+    assert camp["campanha_id"].valor_confirmado == "campanha-ficticia-01"
+    assert camp["campanha_nicho"].nao_verificado()
 
 
 # --- Formato do documento: fixo, sem tolerância a formato alternativo ----
@@ -671,27 +831,33 @@ REAL_SCHEMA_PATH = eqc.caminho_schema_contrato()
 REAL_INPUT_DIR = eqc.diretorio_lotes_entrada()
 
 
-def _versao_do_lote_real_mais_recente() -> "str | None":
-    """Lê só o campo `contract_version` do lote real mais recente, sem
-    passar por `carregar_lote` -- que já lançaria em vez de permitir o skip.
-    `None` se não houver lote, ou se o campo não existir/for ilegível.
+def _lote_real_2_2_0_mais_recente() -> "Path | None":
+    """Arquivo do handoff mais recente cujo `contract_version` é o suportado
+    (2.2.0), entre os de `EQC/pipeline/qualificador-output/`. `None` se não
+    houver nenhum. Lê só o campo `contract_version`, sem `carregar_lote` --
+    que lançaria em vez de permitir o skip.
 
-    Existe porque `EQC\\pipeline\\qualificador-output\\` pode conter um lote
-    publicado por uma versão de contrato anterior à que este módulo suporta
-    agora (ex.: o histórico 1.1.0 nesta máquina em 22/09/2026, antes do
-    QUALIFICADOR publicar um lote 2.0.0 de verdade -- Etapa D, passo D3/D4).
-    Isso não é defeito do loader nem do teste: é o estado real do disco
-    nesta máquina, e os testes de integração abaixo pulam nesse caso em vez
-    de reprovar por um artefato desatualizado que não fui autorizado a
-    regenerar (PROIBIDO tocar em qualificador/ ou rodar o pipeline)."""
+    O diretório pode conter lotes de versões anteriores (ex.: 2.1.0, de
+    01/10/2026); não são defeito do loader nem do teste, são o estado real do
+    disco e são ignorados aqui, não corrigidos (o COMERCIAL não regera saída
+    do QUALIFICADOR)."""
     arquivos = cl.listar_arquivos(REAL_INPUT_DIR) if REAL_INPUT_DIR.is_dir() else []
-    if not arquivos:
-        return None
-    try:
-        doc = json.loads(arquivos[-1].read_text(encoding="utf-8-sig"))
-    except (json.JSONDecodeError, OSError):
-        return None
-    return doc.get("contract_version") if isinstance(doc, dict) else None
+    for arquivo in reversed(arquivos):
+        try:
+            doc = json.loads(arquivo.read_text(encoding="utf-8-sig"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if isinstance(doc, dict) and doc.get("contract_version") == cl.VERSAO_CONTRATO_SUPORTADA:
+            return arquivo
+    return None
+
+
+_MOTIVO_SEM_LOTE_REAL = (
+    "Nenhum handoff real com contract_version=2.2.0 em "
+    "EQC/pipeline/qualificador-output/ nesta máquina (só versões anteriores, "
+    "ou nenhum) -- integração com dado real fica pulada até o QUALIFICADOR "
+    "gerar um lote 2.2.0."
+)
 
 
 def test_fixture_do_schema_bate_com_o_contrato_instalado():
@@ -709,20 +875,16 @@ def test_fixture_do_schema_bate_com_o_contrato_instalado():
 def test_integracao_arquivo_real_do_qualificador():
     """Ponta a ponta contra os artefatos publicados pelo QUALIFICADOR nesta
     máquina. Pula em outra máquina/CI onde EQC não existe, e também quando o
-    lote real em disco ainda é de uma versão de contrato anterior à que este
-    módulo suporta (ver `_versao_do_lote_real_mais_recente`) -- não é um
+    nenhum lote real em disco está na versão de contrato que este
+    módulo suporta (ver `_lote_real_2_2_0_mais_recente`) -- não é um
     teste portátil, é uma verificação de integração local."""
     if not REAL_SCHEMA_PATH.is_file() or not REAL_INPUT_DIR.is_dir():
         pytest.skip("EQC\\contracts ou EQC\\pipeline\\qualificador-output ausentes nesta máquina")
-    versao_real = _versao_do_lote_real_mais_recente()
-    if versao_real != cl.VERSAO_CONTRATO_SUPORTADA:
-        pytest.skip(
-            f"Lote real mais recente declara contract_version={versao_real!r}, "
-            f"não {cl.VERSAO_CONTRATO_SUPORTADA!r} -- nenhum lote real nesta "
-            f"versão publicado ainda nesta máquina."
-        )
+    lote_real = _lote_real_2_2_0_mais_recente()
+    if lote_real is None:
+        pytest.skip(_MOTIVO_SEM_LOTE_REAL)
 
-    lote = cl.carregar_lote(diretorio=REAL_INPUT_DIR, schema=REAL_SCHEMA_PATH)
+    lote = cl.carregar_lote(caminho=lote_real, schema=REAL_SCHEMA_PATH)
 
     assert lote.contract_version == cl.VERSAO_CONTRATO_SUPORTADA
     assert len(lote) == lote.stats["nata"] + lote.stats["candidatos_triagem"]
@@ -781,15 +943,11 @@ def test_integracao_psi_dois_estados_reais_lote_real():
     quando o contrato para de produzi-lo em produção)."""
     if not REAL_SCHEMA_PATH.is_file() or not REAL_INPUT_DIR.is_dir():
         pytest.skip("EQC\\contracts ou EQC\\pipeline\\qualificador-output ausentes nesta máquina")
-    versao_real = _versao_do_lote_real_mais_recente()
-    if versao_real != cl.VERSAO_CONTRATO_SUPORTADA:
-        pytest.skip(
-            f"Lote real mais recente declara contract_version={versao_real!r}, "
-            f"não {cl.VERSAO_CONTRATO_SUPORTADA!r} -- nenhum lote real nesta "
-            f"versão publicado ainda nesta máquina."
-        )
+    lote_real = _lote_real_2_2_0_mais_recente()
+    if lote_real is None:
+        pytest.skip(_MOTIVO_SEM_LOTE_REAL)
 
-    lote = cl.carregar_lote(diretorio=REAL_INPUT_DIR, schema=REAL_SCHEMA_PATH)
+    lote = cl.carregar_lote(caminho=lote_real, schema=REAL_SCHEMA_PATH)
 
     contagem = Counter()
     exemplo_medido = None

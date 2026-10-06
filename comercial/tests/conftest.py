@@ -39,6 +39,8 @@ def _pastas_producao():
     pastas = [
         ("EQC/pipeline", eqc_root / "pipeline"),
         ("EQC/contracts", eqc_root / "contracts"),
+        # campanha ativa (e campanhas prontas) -- Etapa 2, diretor, 06/10/2026
+        ("EQC/config", eqc_root / "config"),
         ("comercial/_consumo_llm", raiz_modulo / "_consumo_llm"),
         ("comercial/_mensagens", raiz_modulo / "_mensagens"),
         ("comercial/_planilhas", raiz_modulo / "_planilhas"),
@@ -48,6 +50,30 @@ def _pastas_producao():
     if consolidada_dir:
         pastas.append(("COMERCIAL_PLANILHAS_DIR (consolidada)", Path(consolidada_dir)))
     return pastas
+
+
+CAMPANHA_DE_TESTE = {
+    "id": "teste-alicante",
+    "nicho": "Teste",
+    "cidade": "Alicante",
+    "categorias_aceitas": ["teste"],
+    "categorias_excluidas": [],
+}
+
+
+@pytest.fixture(autouse=True)
+def _campanha_de_teste(tmp_path_factory, monkeypatch):
+    """Etapa 2 (2.4): a cidade do nome curto vem da campanha ativa
+    (`EQC/config/campanha_ativa.json`), que a operação troca a cada nicho. A
+    suíte não depende do valor real: cada teste lê uma campanha fictícia
+    (cidade Alicante, a mesma dos textos de teste) via `COMERCIAL_CAMPANHA`.
+    Teste que precisa do arquivo real ou de outra campanha remove/troca a env."""
+    import json
+
+    caminho = tmp_path_factory.mktemp("campanha") / "campanha_ativa.json"
+    caminho.write_text(json.dumps(CAMPANHA_DE_TESTE, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setenv("COMERCIAL_CAMPANHA", str(caminho))
+    return caminho
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -26,9 +26,20 @@ _APRES_NOVA = "Soy Douglas, hago webs aquí en Alicante."
 _PADRAO_EMAIL = {"tipo": "email", "regex": r"[\w.+-]+@(?:website|example)\.com"}
 
 
+def _gravar_campanha(caminho, cidade="Alicante", **over):
+    dados = {"id": "teste-campanha", "nicho": "Teste", "cidade": cidade,
+             "categorias_aceitas": ["teste"], "categorias_excluidas": []}
+    dados.update(over)
+    caminho.write_text(json.dumps(dados, ensure_ascii=False), encoding="utf-8")
+    return caminho
+
+
 @pytest.fixture(autouse=True)
-def _cidade_fixa(monkeypatch):
-    monkeypatch.setattr(am, "carregar_cidade_busca", lambda *a, **k: "Alicante")
+def _cidade_fixa(tmp_path, monkeypatch):
+    """Cidade fixa (Alicante) vinda de uma campanha de TESTE em `tmp_path` --
+    `config/cidade_da_busca.json` foi aposentado na Etapa 2 (diretor,
+    04/10/2026); a cidade agora é a da campanha ativa (`campanha.py`)."""
+    monkeypatch.setenv("COMERCIAL_CAMPANHA", str(_gravar_campanha(tmp_path / "campanha_ativa.json")))
 
 
 def _regras(**over):
@@ -323,8 +334,8 @@ def test_nome_curto_seguro_limpa(nome, esperado):
 
 
 @pytest.mark.parametrize("nome,trecho", [
-    ("Alicante, España", "cidade da busca"),
-    ("Clínica Alicante Centro Dental", "cidade da busca"),
+    ("Alicante, España", "cidade da campanha"),
+    ("Clínica Alicante Centro Dental", "cidade da campanha"),
     ("Reformas en Alicante", "genéricas"),
     ("Clínica dental - Alicante", "genéricas"),
     ("ALICANTE", "vazio"),
@@ -337,6 +348,79 @@ def test_nome_curto_seguro_limpa(nome, esperado):
 def test_nome_curto_inseguro_pede_revisao(nome, trecho):
     with pytest.raises(am.LinhaPedeRevisaoError, match=trecho):
         am.nome_curto_seguro(nome, _REGRAS)
+
+
+# --- cidade da campanha ativa (Etapa 2, 2.4) ------------------------------------
+
+
+def test_trocar_a_cidade_da_campanha_muda_o_nome_curto_sem_tocar_mais_nada(tmp_path, monkeypatch):
+    """Aceite 2.4: a mesma chamada, com a cidade trocada só no arquivo de
+    campanha, corta outra cidade do fim do nome."""
+    caminho = tmp_path / "campanha_trocada.json"
+    monkeypatch.setenv("COMERCIAL_CAMPANHA", str(_gravar_campanha(caminho, cidade="Alicante")))
+    assert am.nome_curto_seguro("Lunaria Elche", _REGRAS) == "Lunaria Elche"  # controle: Elche não é a cidade
+    assert am.nome_curto_seguro("Lunaria Alicante", _REGRAS) == "Lunaria"
+    _gravar_campanha(caminho, cidade="Elche")
+    assert am.nome_curto_seguro("Lunaria Elche", _REGRAS) == "Lunaria"
+    assert am.nome_curto_seguro("Lunaria Alicante", _REGRAS) == "Lunaria Alicante"
+
+
+def test_cidade_da_campanha_no_meio_do_nome_pede_revisao_com_a_cidade_nova(tmp_path, monkeypatch):
+    monkeypatch.setenv("COMERCIAL_CAMPANHA", str(_gravar_campanha(tmp_path / "c.json", cidade="Elche")))
+    with pytest.raises(am.LinhaPedeRevisaoError, match="Elche"):
+        am.nome_curto_seguro("Clínica Elche Centro Dental", _REGRAS)
+    assert am.nome_curto_seguro("Clínica Alicante Centro Dental", _REGRAS) == "Clínica Alicante Centro Dental"
+
+
+def test_campanha_ausente_e_falha_alta_nunca_cidade_vazia(tmp_path, monkeypatch):
+    import campanha
+
+    monkeypatch.setenv("COMERCIAL_CAMPANHA", str(tmp_path / "nao-existe.json"))
+    with pytest.raises(campanha.CampanhaInvalidaError, match="não encontrada"):
+        am.nome_curto_seguro("Lunaria Alicante", _REGRAS)
+
+
+@pytest.mark.parametrize("over,trecho", [
+    ({"cidade": ""}, "'cidade'"),
+    ({"cidade": None}, "'cidade'"),
+    ({"id": ""}, "'id'"),
+    ({"categorias_aceitas": []}, "categorias_aceitas"),
+])
+def test_campanha_invalida_e_falha_alta(tmp_path, monkeypatch, over, trecho):
+    import campanha
+
+    monkeypatch.setenv("COMERCIAL_CAMPANHA", str(_gravar_campanha(tmp_path / "c.json", **over)))
+    with pytest.raises(campanha.CampanhaInvalidaError, match=trecho):
+        am.nome_curto_seguro("Lunaria", _REGRAS)
+
+
+def test_campanha_json_quebrado_e_falha_alta(tmp_path, monkeypatch):
+    import campanha
+
+    caminho = tmp_path / "c.json"
+    caminho.write_text("{ isto não é json", encoding="utf-8")
+    monkeypatch.setenv("COMERCIAL_CAMPANHA", str(caminho))
+    with pytest.raises(campanha.CampanhaInvalidaError, match="não é JSON"):
+        am.carregar_cidade_campanha()
+
+
+def test_campanha_sem_env_resolve_o_arquivo_do_eqc(monkeypatch):
+    """Sem a env de teste, o caminho é `<eqc_root>/config/campanha_ativa.json`
+    -- o mesmo arquivo do QUALIFICADOR, sem caminho absoluto no código."""
+    import campanha
+    import eqc
+
+    monkeypatch.delenv("COMERCIAL_CAMPANHA", raising=False)
+    assert campanha.caminho_campanha() == eqc.eqc_root() / "config" / "campanha_ativa.json"
+
+
+def test_cidade_da_busca_json_aposentado():
+    """`config/cidade_da_busca.json` e o código que o lia saíram (Etapa 2)."""
+    from pathlib import Path
+
+    assert not (Path(am.__file__).resolve().parent.parent / "config" / "cidade_da_busca.json").exists()
+    assert not hasattr(am, "carregar_cidade_busca")
+    assert not hasattr(am, "CAMINHO_CIDADE_PADRAO")
 
 
 def test_nome_inseguro_nao_gera_mensagem_pronta():
