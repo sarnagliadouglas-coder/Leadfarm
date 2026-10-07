@@ -1,7 +1,9 @@
 """Troca da campanha ativa por menu (atalho de duplo clique: `Trocar-campanha.bat` na raiz).
 
-Mostra as campanhas de `<eqc_root>/config/campanhas/*.json`, o diretor escolhe um número e o
-script grava `<eqc_root>/config/campanha_ativa.json` com o conteúdo da escolhida. Nada além disso.
+Mostra as campanhas (uma por nicho) de `<eqc_root>/config/campanhas/*.json`, o diretor escolhe
+um número e o script grava `<eqc_root>/config/campanha_ativa.json` com o conteúdo da escolhida.
+Nada além disso. A campanha ativa só decide o nicho -- e a cidade, pela `cidade_padrao` -- de
+lista SEM termo de busca; lista com termo escolhe sozinha (`campanha.escolher_campanha`).
 
 Regras: a escolhida é validada com `campanha.carregar_campanha` ANTES de gravar; qualquer erro
 (opção inválida, campanha inválida) deixa o arquivo ativo intacto (byte a byte). A gravação é
@@ -19,26 +21,25 @@ import tempfile
 from pathlib import Path
 
 import campanha
-import contrato
 
-ENV_DIR_CAMPANHAS = "QUALIFICADOR_CAMPANHAS_DIR"
+ENV_DIR_CAMPANHAS = campanha.ENV_DIR_CAMPANHAS
 
 
 def dir_campanhas() -> Path:
-    """Pasta das campanhas disponíveis. A env (só teste) vence."""
-    env = (os.environ.get(ENV_DIR_CAMPANHAS) or "").strip()
-    return Path(env) if env else contrato.eqc_root() / "config" / "campanhas"
+    """Pasta das campanhas disponíveis (a mesma da escolha pelo termo, `campanha.dir_campanhas`).
+    A env (só teste) vence."""
+    return Path(campanha.dir_campanhas())
 
 
 def listar_campanhas(pasta: Path):
-    """Lista de dicts {arquivo, id, nicho, cidade, valida} em ordem de nome de arquivo.
+    """Lista de dicts {arquivo, id, nicho, cidade_padrao, valida} em ordem de nome de arquivo.
     Arquivo ilegível ou inválido entra na lista como `valida=False` (a escolha será recusada)."""
     itens = []
     for arq in sorted(pasta.glob("*.json"), key=lambda p: p.name.lower()):
-        item = {"arquivo": arq, "id": None, "nicho": None, "cidade": None, "valida": True}
+        item = {"arquivo": arq, "id": None, "nicho": None, "cidade_padrao": None, "valida": True}
         try:
             dados = campanha.carregar_campanha(str(arq))
-            item.update(id=dados["id"], nicho=dados["nicho"], cidade=dados["cidade"])
+            item.update(id=dados["id"], nicho=dados["nicho"], cidade_padrao=dados["cidade_padrao"])
         except campanha.CampanhaInvalidaError:
             item["valida"] = False
         itens.append(item)
@@ -90,7 +91,7 @@ def executar(entrada=None, saida=None) -> int:
     for n, it in enumerate(itens, 1):
         if it["valida"]:
             marca = "   <- ativa agora" if it["id"] == id_ativo else ""
-            print(f"  {n}) {it['nicho']} - {it['cidade']}  ({it['id']}){marca}", file=saida)
+            print(f"  {n}) {it['nicho']} (cidade padrão {it['cidade_padrao']})  ({it['id']}){marca}", file=saida)
         else:
             print(f"  {n}) {it['arquivo'].name}  (arquivo com problema, não dá para usar)", file=saida)
 
@@ -125,8 +126,9 @@ def executar(entrada=None, saida=None) -> int:
         return _recusar(saida, f"Não consegui gravar a troca ({e}). O arquivo anterior foi mantido.")
 
     print("\nPronto. Campanha ativa agora:", file=saida)
-    print(f"  {dados['nicho']} - {dados['cidade']}  ({dados['id']})", file=saida)
-    print("\nAgora pode importar a lista desse nicho.", file=saida)
+    print(f"  {dados['nicho']} (cidade padrão {dados['cidade_padrao']})  ({dados['id']})", file=saida)
+    print("\nAgora pode importar a lista desse nicho. A cidade padrão só vale para lista sem termo "
+          "de busca; lista com termo usa o nicho e a cidade da busca.", file=saida)
     return 0
 
 

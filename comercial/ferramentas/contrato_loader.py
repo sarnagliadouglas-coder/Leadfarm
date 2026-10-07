@@ -41,12 +41,15 @@ Uso:
     lote.candidatos_triagem                               # só os candidatos à triagem visual
     lote.descartados                                       # lista crua, fora da proteção de LeadQualificado
 
-Campos da 2.2.0 (nomes exatos dos atributos; cada um devolve um `CampoEvidencia`,
-com `.presente()` / `.confirmado_ausente()` / `.nao_verificado()` /
+Campos da 2.2.0 e da 2.3.0 (nomes exatos dos atributos; cada um devolve um
+`CampoEvidencia`, com `.presente()` / `.confirmado_ausente()` / `.nao_verificado()` /
 `.valor_confirmado` / `.bruto()`):
-    lead.campanha_id               # id da campanha ativa no import; NAO_VERIFICADO
+    lead.campanha_id               # id da campanha no import; NAO_VERIFICADO
                                    #   (valor null) em lead importado antes da 2.2.0
     lead.campanha_nicho            # rótulo do nicho da campanha; idem
+    lead.campanha_cidade           # (2.3.0) cidade da campanha no import (a do termo
+                                   #   da busca, validada pelo INE, ou a cidade_padrao);
+                                   #   NAO_VERIFICADO em lead anterior à 2.3.0
     lead.possivel_mesmo_negocio    # aviso do filtro de redes/multiunidade (é aviso,
                                    #   não julgamento). CONFIRMADO_PRESENTE: valor é a
                                    #   lista de {place_id, por, chave} das outras
@@ -55,7 +58,8 @@ com `.presente()` / `.confirmado_ausente()` / `.nao_verificado()` /
     lead["campanha_id"] etc.       # mesmo objeto, pelo acesso por índice
     campanha_do_descartado(d)      # d = item de lote.descartados -> dict
                                    #   {"campanha_id": CampoEvidencia,
-                                   #    "campanha_nicho": CampoEvidencia}
+                                   #    "campanha_nicho": CampoEvidencia,
+                                   #    "campanha_cidade": CampoEvidencia}
 
 Configuração por ambiente (localização do EQC — resolvida por `eqc.py`, sem
 caminho absoluto de máquina fixo no código):
@@ -73,7 +77,7 @@ Requisitos:
 Trava de versão
 ----------------
 `leads_qualificados.schema.json` já declara `contract_version` como
-`"const": "2.2.0"` (o valor de `VERSAO_CONTRATO_SUPORTADA`) — um documento com outra versão já reprova na validação
+`"const": "2.3.0"` (o valor de `VERSAO_CONTRATO_SUPORTADA`) — um documento com outra versão já reprova na validação
 de schema. Este módulo verifica a versão de novo, separadamente, depois da
 validação. A razão para a redundância: a garantia de schema depende de
 qual arquivo de schema foi carregado. Se `COMERCIAL_CONTRACT_SCHEMA` algum
@@ -226,7 +230,9 @@ ENV_SCHEMA = eqc.ENV_CONTRACT_SCHEMA            # "COMERCIAL_CONTRACT_SCHEMA"
 # campanha_nicho e possivel_mesmo_negocio, e por descartado campanha_id e
 # campanha_nicho -- lotes 2.1.0 não são mais aceitos (regerar a saída no
 # QUALIFICADOR).
-VERSAO_CONTRATO_SUPORTADA = "2.2.0"
+# 2.3.0 (06/10/2026): acrescenta campanha_cidade por lead e por descartado
+# (multicidade) -- lotes 2.2.0 não são mais aceitos (regerar a saída).
+VERSAO_CONTRATO_SUPORTADA = "2.3.0"
 
 # leads_qualificados_20260906-201042_v2.0.0.json
 # O `.meta.json` que acompanha cada lote NÃO é um arquivo de leads e é
@@ -405,13 +411,15 @@ def _envolver_evidencias(valor: Any) -> Any:
 
 
 def campanha_do_descartado(descartado: Mapping) -> dict:
-    """`campanha_id` e `campanha_nicho` de um item de `Lote.descartados`
-    (contrato 2.2.0), como `CampoEvidencia`. `descartados` segue crua fora
-    disto -- só estes dois campos ganham a proteção de estado.
+    """`campanha_id`, `campanha_nicho` (contrato 2.2.0) e `campanha_cidade`
+    (2.3.0) de um item de `Lote.descartados`, como `CampoEvidencia`.
+    `descartados` segue crua fora disto -- só estes campos ganham a proteção
+    de estado.
     """
     return {
         "campanha_id": CampoEvidencia(descartado["campanha_id"]),
         "campanha_nicho": CampoEvidencia(descartado["campanha_nicho"]),
+        "campanha_cidade": CampoEvidencia(descartado["campanha_cidade"]),
     }
 
 
@@ -563,6 +571,13 @@ class LeadQualificado(Mapping):
     def campanha_nicho(self) -> "CampoEvidencia":
         """Nicho (rótulo humano) da campanha ativa no import (contrato 2.2.0)."""
         return self["campanha_nicho"]
+
+    @property
+    def campanha_cidade(self) -> "CampoEvidencia":
+        """Cidade da campanha no import do lead (contrato 2.3.0): a do termo da
+        busca, validada pela lista do INE, ou a `cidade_padrao` em lista sem
+        termo. `NAO_VERIFICADO` (valor null) para lead anterior à 2.3.0."""
+        return self["campanha_cidade"]
 
     @property
     def possivel_mesmo_negocio(self) -> "CampoEvidencia":
@@ -766,8 +781,8 @@ def validar(documento: Any, schema: dict, origem: Optional[Path] = None) -> None
 
 
 _DICA_REGERAR = (
-    " Lote 2.1.0 é anterior aos campos de campanha e de possível mesmo "
-    "negócio: é preciso regerar a saída no QUALIFICADOR (contrato 2.2.0)."
+    " Lote 2.2.0 ou anterior não tem a cidade da campanha (campanha_cidade): "
+    "é preciso regerar a saída no QUALIFICADOR (contrato 2.3.0)."
 )
 
 
@@ -784,7 +799,7 @@ def _verificar_versao(documento: Any, origem: Path) -> None:
         raise VersaoContratoNaoSuportadaError(
             f"Arquivo {origem} declara contract_version={versao!r}, mas este "
             f"módulo só entende {VERSAO_CONTRATO_SUPORTADA!r}."
-            f"{_DICA_REGERAR if versao == '2.1.0' else ''} Um schema mais "
+            f"{_DICA_REGERAR if versao in ('2.1.0', '2.2.0') else ''} Um schema mais "
             f"novo poderia validar este arquivo estruturalmente sem que este "
             f"código tenha sido revisado para o que mudou — ver CONTRACT.md, "
             f"seção 'Histórico de versões', antes de atualizar "

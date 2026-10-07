@@ -1,6 +1,6 @@
 # Contrato QUALIFICADOR → COMERCIAL
 
-**Versão:** 2.2.0
+**Versão:** 2.3.0
 **Schema formal:** `leads_qualificados.schema.json` (JSON Schema draft 2020-12)
 **Arquivo físico:** `leads_qualificados_<AAAAMMDD>-<HHMMSS>_v<contract_version>.json`, gravado em `QUALIFICADOR_OUTPUT_DIR` (hoje `EQC\pipeline\qualificador-output\`)
 **Sidecar:** `<mesmo-nome-base>.meta.json`
@@ -39,12 +39,13 @@ COMERCIAL e não atravessa este contrato.
 
 `priority` e `priority_label` nunca são o mesmo campo: `priority_label` tem um estado extra (`needs_review`) que `priority` não representa. Não assuma equivalência.
 
-## Campanha e aviso de mesmo negócio (2.2.0)
+## Campanha e aviso de mesmo negócio (2.2.0; cidade em 2.3.0)
 
 | Campo | Onde | Conteúdo |
 |---|---|---|
-| `campanha_id` | cada lead de `nata` / `candidatos_triagem` e cada item de `descartados` | `{valor, estado}`: id da campanha ativa (`EQC/config/campanha_ativa.json`) no momento do import do lead. Nunca re-carimbado. Lead importado antes de 2.2.0 → `{valor: null, estado: NAO_VERIFICADO}` |
+| `campanha_id` | cada lead de `nata` / `candidatos_triagem` e cada item de `descartados` | `{valor, estado}`: id da campanha (uma por nicho, `EQC/config/campanhas/`) usada no import do lead — a escolhida pelo termo da busca ou, em lista sem termo, a ativa do menu (`EQC/config/campanha_ativa.json`). Nunca re-carimbado. Lead importado antes de 2.2.0 → `{valor: null, estado: NAO_VERIFICADO}` |
 | `campanha_nicho` | idem | `{valor, estado}`: rótulo humano do nicho da campanha (campo `nicho` da campanha). Mesma regra de `NAO_VERIFICADO` |
+| `campanha_cidade` | idem | (2.3.0) `{valor, estado}`: cidade da campanha no import — o município do termo da busca, validado pela lista oficial de municípios do INE e gravado na grafia oficial da forma digitada (ex.: `Alacant` ou `Alicante`), ou a `cidade_padrao` da campanha em lista sem termo. Nunca re-carimbado. Lead importado antes de 2.3.0 → `{valor: null, estado: NAO_VERIFICADO}` |
 | `possivel_mesmo_negocio` | cada lead de `nata` / `candidatos_triagem` | `{valor, estado}`. O filtro de redes do QUALIFICADOR agrupa fichas por telefone normalizado e por domínio do site próprio (domínio de portal, construtor, rede social ou página do Google não agrupa), sobre todo o pool. Grupo com 3+ fichas é descartado (`rede_ou_multiunidade`); grupo de 2 não é descartado e marca as duas: `valor` = lista `[{place_id, por: telefone\|dominio, chave}]` da(s) outra(s) ficha(s), `estado: CONFIRMADO_PRESENTE`. Checado sem par → `{valor: null, estado: CONFIRMADO_AUSENTE}`. Lead anterior ao filtro → `NAO_VERIFICADO`. É **aviso**, não julgamento: o COMERCIAL decide o que fazer |
 
 Motivos de descarte acrescentados em 2.2.0 (`descartados[*].motivo` é texto livre no
@@ -86,6 +87,7 @@ COMERCIAL. **Não** é validado por schema: este quadro é a referência legíve
 | 17 | `possivel_mesmo_negocio` | (2.2.0) place_id(s) da(s) outra(s) ficha(s) do par, separados por vírgula; vazio = checado sem par; `NAO_VERIFICADO` = lead anterior ao filtro |
 | 18 | `prioridade_rotulo` | (2.2.0) Prioridade da Onda 1 (`alta` \| `media` \| `baixa`, `qualificacao.priority`); vazio nas linhas que vêm da Onda 2. **Não autoritativa**, como `priorizacao` |
 | 19 | `prioridade_score` | (2.2.0) Score da Onda 1 (0–100, `qualificacao.score`); vazio nas linhas da Onda 2. **Não autoritativo** |
+| 20 | `campanha_cidade` | (2.3.0) cidade da campanha no import (mesma regra do campo do JSON); `NAO_VERIFICADO` em lead anterior ao carimbo. Não confundir com a coluna 5 (`cidade`), que é a cidade do endereço da ficha |
 
 ## O que **não** está no contrato (removido deliberadamente)
 
@@ -113,6 +115,21 @@ Importante para o A1: `NAO_VERIFICADO` não é o mesmo que `CONFIRMADO_AUSENTE`.
 Chaves e enums em português. Valores de texto livre (nomes, endereços, categorias) preservam o idioma da fonte (espanhol, leads da Espanha). Ver decisão D5 no histórico do projeto.
 
 ## Histórico de versões
+
+### 2.3.0 — MINOR, aditiva
+Acrescenta, por lead (`nata`, `candidatos_triagem`) e por descartado, o campo
+**obrigatório** `campanha_cidade` (`{valor, estado}`, `NAO_VERIFICADO` para lead importado
+antes de 2.3.0), e a coluna 20 `campanha_cidade` no fim do CSV humano. Motivo: as campanhas
+passam a ser uma por nicho, sem cidade fixa; a cidade vem do termo da busca (validada pela
+lista oficial de municípios do INE) ou, em lista sem termo, da `cidade_padrao` da campanha.
+Conjunto de chaves obrigatórias mudou; MINOR segue o precedente de 1.1.0 e 2.2.0.
+**Não é compatível em nenhum dos dois sentidos:** o schema 2.3.0 recusa arquivos 2.2.0
+(falta `campanha_cidade` e o `const` de `contract_version` é outro), e um consumidor 2.2.0
+recusa arquivos 2.3.0 (`contract_version` diferente e `additionalProperties: false` nos
+blocos `lead` e `descartado`). Produtor e consumidor precisam passar para 2.3.0 juntos.
+No CSV humano a coluna nova entra no fim; um leitor que só conhece as 19 primeiras colunas
+continua lendo-as nas mesmas posições.
+Autorizado pelo diretor, 06/10/2026.
 
 ### 2.2.0 — MINOR, aditiva
 Acrescenta, por lead (`nata`, `candidatos_triagem`), os campos **obrigatórios**

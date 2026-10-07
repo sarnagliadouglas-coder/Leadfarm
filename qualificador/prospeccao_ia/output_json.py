@@ -108,8 +108,9 @@ def _contato(emp):
 
 
 def _campo_do_import(emp, campo):
-    """contract_version 2.2.0: campo gravado pelo import (carimbo da campanha). Lead
-    importado antes de existir o campo -> NAO_VERIFICADO, nunca valor inventado."""
+    """contract_version 2.2.0 (campanha_id, campanha_nicho) e 2.3.0 (campanha_cidade): campo
+    gravado pelo import (carimbo da campanha). Lead importado antes de existir o campo ->
+    NAO_VERIFICADO, nunca valor inventado."""
     if campo not in emp:
         return {"valor": None, "estado": NAO_VERIFICADO}
     return _campo_verificado(emp.get(campo))
@@ -399,6 +400,7 @@ def _lead_saida(registro, estagio):
         "estagio_analise": estagio,
         "campanha_id": _campo_do_import(emp, "campanha_id"),
         "campanha_nicho": _campo_do_import(emp, "campanha_nicho"),
+        "campanha_cidade": _campo_do_import(emp, "campanha_cidade"),  # 2.3.0
         "possivel_mesmo_negocio": _possivel_mesmo_negocio(emp),
         "identidade": _identidade(emp),
         "contato": _contato(emp),
@@ -469,6 +471,7 @@ def _descartado_saida(registro):
         "place_id": emp.get("place_id"),
         "campanha_id": _campo_do_import(emp, "campanha_id"),
         "campanha_nicho": _campo_do_import(emp, "campanha_nicho"),
+        "campanha_cidade": _campo_do_import(emp, "campanha_cidade"),  # 2.3.0
         "identidade": {"nome": emp.get("nome"), "nicho": emp.get("nicho"), "cidade": emp.get("cidade")},
         "motivo": motivo,
         "campos_do_corte": campos,

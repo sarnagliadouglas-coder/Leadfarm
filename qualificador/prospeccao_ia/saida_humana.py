@@ -39,6 +39,9 @@ COLUNAS = (
     # campanha ativa no import, aviso do filtro de redes (rede_multiunidade.py) e a
     # prioridade da Onda 1 como lead_qualification.qualificar_onda1 já calcula.
     "campanha_id", "campanha_nicho", "possivel_mesmo_negocio", "prioridade_rotulo", "prioridade_score",
+    # contract_version 2.3.0 (multicidade, 06/10/2026): cidade da campanha no import -- a do
+    # termo da busca, validada pela lista do INE, ou a cidade_padrao em lista sem termo.
+    "campanha_cidade",
 )
 
 # Valor das colunas de campanha/aviso quando o lead foi importado antes de o campo existir --
@@ -182,6 +185,7 @@ def _linha(pista, motivo, emp, classe_site, qualificacao=None):
         "place_id": emp.get("place_id") or "",
         "campanha_id": _campo_do_import(emp, "campanha_id"),
         "campanha_nicho": _campo_do_import(emp, "campanha_nicho"),
+        "campanha_cidade": _campo_do_import(emp, "campanha_cidade"),
         "possivel_mesmo_negocio": _possivel_mesmo_negocio(emp),
         "prioridade_rotulo": qualificacao.get("priority") or "",
         "prioridade_score": prioridade_score if prioridade_score is not None else "",

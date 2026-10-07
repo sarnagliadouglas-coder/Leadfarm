@@ -216,17 +216,18 @@ def _classificar_reputacao(nota_google):
 
 
 class AgentColetor:
-    def coletar_leads_de_csv(self, caminho_csv, campanha=None):
+    def coletar_leads_de_csv(self, caminho_csv, campanha=None, cidade=None):
         """Lê o CSV e classifica os leads em Onda 1 (elegível), Onda 2 (fila futura) e
         reprovados. Valida o contrato EXTRATOR -> QUALIFICADOR (sidecar + header) ANTES de
         importar qualquer coisa -- violação de contrato levanta csv_contrato.ContratoCsvInvalido
         e nada é importado.
 
-        `campanha` (dict já validado por campanha.carregar_campanha): cada lead recebe o
-        carimbo `campanha_id`/`campanha_nicho`, e o corte de categoria da campanha roda ANTES
-        dos filtros comerciais e da separação em ondas -- lead fora do perfil nunca chega a
-        nenhuma onda. main.importar_csv sempre passa a campanha; None (uso direto em teste)
-        pula carimbo e corte.
+        `campanha` (dict já validado por campanha.carregar_campanha) e `cidade` (a escolhida
+        no import, `campanha.escolher_campanha`): cada lead recebe o carimbo
+        `campanha_id`/`campanha_nicho`/`campanha_cidade`, e o corte de categoria da campanha
+        roda ANTES dos filtros comerciais e da separação em ondas -- lead fora do perfil nunca
+        chega a nenhuma onda. main.importar_csv sempre passa as duas; `cidade` None (uso direto
+        em teste) = a `cidade_padrao` da campanha; `campanha` None pula carimbo e corte.
 
         Devolve (wave1, reprovados, wave2, custo, reconciliacao). `reconciliacao` conta o que
         entrou vs. o que sumiu no import (linhas sem Name, dedup interno) -- ver main.importar_csv,
@@ -255,13 +256,14 @@ class AgentColetor:
         if reprovados_deslocada:
             print(f"[Coletor] {len(reprovados_deslocada)} lead(s) com linha deslocada irrecuperável.")
         if campanha is not None:
+            carimbo = campanha_mod.carimbo(campanha, cidade if cidade is not None else campanha["cidade_padrao"])
             for lead in reprovados_deslocada:
-                lead.update(campanha_mod.carimbo(campanha))
+                lead.update(carimbo)
 
         reprovados_categoria = []
         if campanha is not None:
             for lead in leads_dedup:
-                lead.update(campanha_mod.carimbo(campanha))
+                lead.update(carimbo)
             leads_dedup, reprovados_categoria = self._aplicar_filtro_categoria(leads_dedup, campanha)
             if reprovados_categoria:
                 print(f"[Coletor] {len(reprovados_categoria)} lead(s) fora das categorias da campanha "

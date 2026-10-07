@@ -66,7 +66,10 @@ COLUNAS_FUNIL = ("Etapa", "Resultado", "Enviada como", "Motivo da edição", "De
 # ("campanha", "nicho", "pista", "prioridade_rotulo", "prioridade_score";
 # ver planilha_envio.COLUNAS_CAMPANHA). Planilha sem a coluna = "". Registro
 # antigo ganha as colunas no fim do cabeçalho na próxima gravação.
-COLUNAS_CAMPANHA_REGISTRO = ("campanha", "nicho", "pista", "prioridade_rotulo", "prioridade_score")
+# Contrato 2.3.0 (multicidade, 06/10/2026): "cidade_conferida" no fim, mesmo padrão.
+COLUNAS_CAMPANHA_REGISTRO = (
+    "campanha", "nicho", "pista", "prioridade_rotulo", "prioridade_score", "cidade_conferida",
+)
 
 COLUNAS_REGISTRO = (
     "place_id", "nome", "telefone", "aba_origem", "enviado_em",

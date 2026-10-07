@@ -1,0 +1,3 @@
+# Scripts .bat do Windows com fim de linha CRLF na cópia de trabalho (o cmd espera CRLF;
+# com LF, rótulos e saltos podem falhar). No repositório o arquivo fica normalizado.
+*.bat eol=crlf

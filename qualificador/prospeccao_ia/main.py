@@ -1,3 +1,4 @@
+import csv
 import os
 import re
 import json
@@ -11,6 +12,7 @@ import campanha as campanha_mod
 import contrato
 import csv_contrato
 import env_loader
+import erro_import
 import gbp_diagnostic
 import lead_qualification
 import output_json
@@ -56,6 +58,8 @@ PATH_COM_SITE = os.path.join(DATA_DIR, "leads_com_site.json")
 # Metadado da última importação (qual CSV do EXTRATOR alimentou esta rodada). Estado
 # interno -- fica no DATA_DIR do projeto, NÃO faz parte do contrato externo.
 PATH_IMPORT_META = os.path.join(DATA_DIR, "_import_meta.json")
+# Traceback de erro do import (erro_import.gravar_log). Dado operacional, fora do git.
+LOG_DIR = os.path.join(DATA_DIR, "logs")
 
 # A saída (contrato QUALIFICADOR -> COMERCIAL) NÃO tem mais path fixo: vai para
 # contrato.output_dir() (env QUALIFICADOR_OUTPUT_DIR), com nome versionado por rodada.
@@ -254,26 +258,35 @@ def _aplicar_filtro_rede(wave1, wave2, reprovados, config_rede, conhecidas_globa
 def importar_csv(caminho_csv):
     print("\n--- IMPORT ---")
     if not caminho_csv or not os.path.exists(caminho_csv):
-        print(f"[Erro] Arquivo não encontrado: {caminho_csv}")
-        return
+        raise erro_import.CsvIlegivelError(f"Arquivo não encontrado: {caminho_csv}")
 
-    # Falha alta ANTES de ler o CSV ou gravar qualquer coisa: sem campanha ativa válida (ou
-    # sem a config de redes), o import não roda. Propaga, como ContratoCsvInvalido.
-    campanha = campanha_mod.carregar_campanha()
+    # Falha alta ANTES de ler o CSV ou gravar qualquer coisa: sidecar fora do contrato,
+    # termo da busca que não aponta para exatamente uma campanha, campanha inválida (ou
+    # config de redes ausente) -- o import não roda. Propaga, como ContratoCsvInvalido.
+    sidecar, _avisos = csv_contrato.validar_sidecar(caminho_csv)
+    escolha = campanha_mod.escolher_campanha((sidecar or {}).get("termo_busca"))
+    campanha = escolha["campanha"]
     config_rede = rede_multiunidade.carregar_config()
-    print(f"[Import] Campanha ativa: {campanha['id']} ({campanha['nicho']}, {campanha['cidade']}).")
+    print("==================================================")
+    for linha in escolha["avisos"]:
+        print(f"[Import] {linha}")
+    print("==================================================")
+    print(f"[Import] Campanha: {campanha['id']} ({campanha['nicho']}); cidade: {escolha['cidade']}; "
+          f"origem: {escolha['origem']}.")
 
     coletor = AgentColetor()
     try:
-        wave1, reprovados, wave2, custo, recon = coletor.coletar_leads_de_csv(caminho_csv, campanha=campanha)
+        wave1, reprovados, wave2, custo, recon = coletor.coletar_leads_de_csv(
+            caminho_csv, campanha=campanha, cidade=escolha["cidade"])
     except csv_contrato.ContratoCsvInvalido:
         # Falha alta: contrato EXTRATOR -> QUALIFICADOR violado. Não é "este CSV está
         # corrompido", é "pare e conserte o EXTRATOR". Propaga (nada foi gravado).
         raise
-    except Exception as e:
-        print(f"[Erro] Falha ao importar o CSV: {e}")
-        print("[Erro] Nenhum dado foi gravado. Corrija o arquivo e tente novamente.")
-        return
+    except (UnicodeError, csv.Error, OSError) as e:
+        # CSV que não se deixa ler (decodificação, arquivo malformado, acesso). Falha alta
+        # com mensagem clara (erro_import), nada gravado. Qualquer outra exceção é defeito
+        # e sobe como erro inesperado -- antes um `except Exception` a engolia e saía com 0.
+        raise erro_import.CsvIlegivelError(f"O CSV '{os.path.basename(caminho_csv)}' não pôde ser lido: {e}") from e
 
     total_coletor = len(wave1) + len(wave2) + len(reprovados)
     conhecidas_globais = _todas_chaves_conhecidas()
@@ -292,7 +305,8 @@ def importar_csv(caminho_csv):
     n_wave2 = _acrescentar_novos(PATH_COM_SITE, wave2, "queued_future", conhecidas_globais)
 
     salvar_json(PATH_IMPORT_META, {"origem_csv": os.path.basename(caminho_csv), "importado_em": _now_iso(),
-                                   "campanha_id": campanha["id"]})
+                                   "campanha_id": campanha["id"], "campanha_cidade": escolha["cidade"],
+                                   "origem_campanha": escolha["origem"]})
 
     novos = n_wave1 + n_wave2 + n_reprovados
     dedup_global = total_coletor - novos
@@ -1103,6 +1117,24 @@ def run():
     print(" 🤖 SISTEMA AUTÔNOMO DE PROSPECÇÃO (ESPANHA) 🤖")
     print("==================================================")
 
+    if not args.csv_path:
+        _despachar(args, parser)
+        return
+    # Com import: erro previsto vira mensagem curta + log + código de saída (erro_import);
+    # qualquer outro erro grava o log e sobe como sempre -- nunca é engolido.
+    try:
+        _despachar(args, parser)
+    except erro_import.PREVISTOS as e:
+        log = erro_import.gravar_log(e, LOG_DIR)
+        print(erro_import.mensagem(e, log), file=sys.stderr)
+        sys.exit(erro_import.CODIGO_SAIDA)
+    except Exception as e:
+        log = erro_import.gravar_log(e, LOG_DIR)
+        print(f"\n[Erro inesperado] detalhe técnico também gravado em: {log}", file=sys.stderr)
+        raise
+
+
+def _despachar(args, parser):
     if args.command == "all":
         fase_all(args.csv_path)
     elif args.csv_path:

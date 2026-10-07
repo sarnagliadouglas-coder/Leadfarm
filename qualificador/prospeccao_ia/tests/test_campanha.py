@@ -15,7 +15,7 @@ HEADER = list(csv_contrato.COLUNAS_OBRIGATORIAS_V1)
 CAMPANHA_PSI = {
     "id": "psi-teste",
     "nicho": "Psicólogos",
-    "cidade": "Cidade Ficticia",
+    "cidade_padrao": "Cidade Ficticia",
     "categorias_aceitas": ["psicólogo", "psicología", "salud mental", "psicoterapeuta"],
     "categorias_excluidas": [],
 }
@@ -77,7 +77,7 @@ def test_campanha_json_invalido_levanta(tmp_path, monkeypatch):
     assert "não é JSON válido" in str(exc.value)
 
 
-@pytest.mark.parametrize("campo", ["id", "nicho", "cidade", "categorias_aceitas", "categorias_excluidas"])
+@pytest.mark.parametrize("campo", ["id", "nicho", "cidade_padrao", "categorias_aceitas", "categorias_excluidas"])
 def test_campo_minimo_faltando_levanta_nomeando_o_campo(tmp_path, monkeypatch, campo):
     dados = {k: v for k, v in CAMPANHA_PSI.items() if k != campo}
     _gravar_campanha(tmp_path, monkeypatch, dados)
@@ -154,14 +154,18 @@ def test_import_carimba_campanha_e_nunca_recarimba(tmp_path, monkeypatch):
     _gravar_campanha(tmp_path, monkeypatch, CAMPANHA_PSI)
     main_mod.importar_csv(str(_csv(tmp_path, [_linha(Name="A", **{"Place Id": "pa"})], nome="extrator_a_v1.csv")))
 
-    _gravar_campanha(tmp_path, monkeypatch, {**CAMPANHA_PSI, "id": "outra", "nicho": "Outro"}, nome="c2.json")
+    _gravar_campanha(tmp_path, monkeypatch, {**CAMPANHA_PSI, "id": "outra", "nicho": "Outro",
+                                             "cidade_padrao": "Outra Cidade"}, nome="c2.json")
     main_mod.importar_csv(str(_csv(tmp_path, [_linha(Name="A", **{"Place Id": "pa"}),
                                               _linha(Name="B", **{"Place Id": "pb"}, Email="b@ficticio.es")],
                                    nome="extrator_b_v1.csv")))
 
     coletados = {r["dados_empresa"]["place_id"]: r["dados_empresa"] for r in main_mod.carregar_json(main_mod.PATH_COLETADOS)}
-    assert (coletados["pa"]["campanha_id"], coletados["pa"]["campanha_nicho"]) == ("psi-teste", "Psicólogos")
-    assert (coletados["pb"]["campanha_id"], coletados["pb"]["campanha_nicho"]) == ("outra", "Outro")
+    def carimbo(emp):
+        return emp["campanha_id"], emp["campanha_nicho"], emp["campanha_cidade"]
+    # lista sem termo: a cidade é a cidade_padrao da campanha do menu (multicidade, 06/10/2026)
+    assert carimbo(coletados["pa"]) == ("psi-teste", "Psicólogos", "Cidade Ficticia")
+    assert carimbo(coletados["pb"]) == ("outra", "Outro", "Outra Cidade")
 
 
 # --- import: corte de categoria antes das ondas -----------------------------------------
@@ -195,19 +199,42 @@ def test_lead_fora_da_categoria_nao_chega_a_nenhuma_onda(tmp_path, monkeypatch, 
 # Raízes autorizadas pelo diretor (04/10/2026). Testadas com campanhas de teste: o arquivo
 # real em EQC/config/ não foi alterado nesta rodada (edição negada pelo ambiente).
 RAIZES = {
-    "psicologos": ["psicólog", "psicoterapeut", "salud mental"],
-    "abogados": ["abogad", "servicios legales", "bufete", "gestor"],
+    # "terapeut" (psicólogos) e "asistencia jurídica" (abogados): diretor, 07/10/2026.
+    "psicologos": ["psicólog", "psicoterapeut", "salud mental", "terapeut"],
+    "abogados": ["abogad", "servicios legales", "bufete", "gestor", "asistencia jurídica"],
     "arquitectos": ["arquitect"],
 }
+# "fisioterapeut" excluído em psicólogos (diretor, 07/10/2026): "Fisioterapeuta" contém "terapeut".
+EXCLUIDAS = {"psicologos": ["fisioterapeut"], "abogados": [], "arquitectos": []}
 
 
 def _camp(nicho):
-    return {**CAMPANHA_PSI, "id": nicho, "categorias_aceitas": RAIZES[nicho]}
+    return {**CAMPANHA_PSI, "id": nicho, "categorias_aceitas": RAIZES[nicho],
+            "categorias_excluidas": EXCLUIDAS[nicho]}
+
+
+@pytest.mark.parametrize("categoria,esperado", [
+    ("Terapeuta", None),
+    ("Psicólogo", None),
+    ("Fisioterapeuta", (campanha.MOTIVO_EXCLUIDA, "fisioterapeut")),
+    ("Psiquiatra", (campanha.MOTIVO_FORA_DO_PERFIL, None)),
+])
+def test_psicologos_terapeut_aceito_e_fisioterapeut_excluido(categoria, esperado):
+    assert campanha.motivo_categoria(categoria, _camp("psicologos")) == esperado
+
+
+def test_sem_a_exclusao_fisioterapeuta_passaria_como_psicologo():
+    """Controle: o motivo da exclusão -- por "contém", "Fisioterapeuta" casa com "terapeut"."""
+    sem_exclusao = {**_camp("psicologos"), "categorias_excluidas": []}
+    assert campanha.motivo_categoria("Fisioterapeuta", sem_exclusao) is None
 
 
 @pytest.mark.parametrize("nicho,categoria", [
     ("psicologos", "Psicóloga"), ("psicologos", "Psicólogo infantil"), ("psicologos", "Psicoterapeuta"),
+    ("psicologos", "Terapeuta"),
     ("abogados", "Abogada"), ("abogados", "Abogado"), ("abogados", "Gestoría"),
+    ("abogados", "Proveedor de servicios de asistencia jurídica"),
+    ("abogados", "PROVEEDOR DE SERVICIOS DE ASISTENCIA JURIDICA"),
     ("arquitectos", "Arquitecta"), ("arquitectos", "Arquitecto técnico"), ("arquitectos", "Estudio de arquitectura"),
 ])
 def test_raiz_casa_feminino_e_variantes(nicho, categoria):
@@ -215,7 +242,8 @@ def test_raiz_casa_feminino_e_variantes(nicho, categoria):
 
 
 @pytest.mark.parametrize("nicho,categoria", [
-    ("psicologos", "Dentista"), ("psicologos", "Abogada"),
+    ("psicologos", "Dentista"), ("psicologos", "Abogada"), ("psicologos", "Psiquiatra"),
+    ("psicologos", "Centro de terapia"),  # "terapeut" não casa com "terapia" (limite registrado, 07/10/2026)
     ("abogados", "Arquitecta"), ("abogados", "Psicóloga"),
     ("arquitectos", "Abogado"), ("arquitectos", "Diseñador de interiores"),
 ])

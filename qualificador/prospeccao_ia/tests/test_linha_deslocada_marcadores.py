@@ -122,7 +122,7 @@ def _csv(tmp_path, linhas):
 
 def test_import_recupera_advogado_deslocado_e_reprova_o_irrecuperavel(tmp_path, monkeypatch, capsys):
     campanha = tmp_path / "abogados.json"
-    campanha.write_text(json.dumps({"id": "abog-teste", "nicho": "Abogados", "cidade": "Cidade Ficticia",
+    campanha.write_text(json.dumps({"id": "abog-teste", "nicho": "Abogados", "cidade_padrao": "Cidade Ficticia",
                                     "categorias_aceitas": ["abogad", "servicios legales", "bufete", "gestor"],
                                     "categorias_excluidas": []}), encoding="utf-8")
     monkeypatch.setenv("QUALIFICADOR_CAMPANHA", str(campanha))

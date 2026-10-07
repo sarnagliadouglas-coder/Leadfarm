@@ -53,9 +53,9 @@ def _pastas_producao():
 
 
 CAMPANHA_DE_TESTE = {
-    "id": "teste-alicante",
+    "id": "teste-2026-10",
     "nicho": "Teste",
-    "cidade": "Alicante",
+    "cidade_padrao": "Alicante",
     "categorias_aceitas": ["teste"],
     "categorias_excluidas": [],
 }
@@ -63,11 +63,11 @@ CAMPANHA_DE_TESTE = {
 
 @pytest.fixture(autouse=True)
 def _campanha_de_teste(tmp_path_factory, monkeypatch):
-    """Etapa 2 (2.4): a cidade do nome curto vem da campanha ativa
-    (`EQC/config/campanha_ativa.json`), que a operação troca a cada nicho. A
-    suíte não depende do valor real: cada teste lê uma campanha fictícia
-    (cidade Alicante, a mesma dos textos de teste) via `COMERCIAL_CAMPANHA`.
-    Teste que precisa do arquivo real ou de outra campanha remove/troca a env."""
+    """Desde o contrato 2.3.0 (multicidade, 06/10/2026) a planilha não lê
+    campanha: a cidade vem de cada lead (`campanha_cidade`). Mesmo assim a
+    suíte nunca aponta para a campanha real do EQC: quem chamar
+    `campanha.carregar_campanha()` sem caminho lê esta campanha fictícia, via
+    `COMERCIAL_CAMPANHA`. Teste que precisa de outra troca a env."""
     import json
 
     caminho = tmp_path_factory.mktemp("campanha") / "campanha_ativa.json"

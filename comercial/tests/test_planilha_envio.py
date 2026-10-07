@@ -111,6 +111,7 @@ def _linha_csv(**over):
         "telefone": "600000101", "email": "", "instagram": "", "site": "",
         "classe_site": "sem_site", "avaliacoes": "27", "nota": "4.8",
         "google_maps_url": "https://maps.google.com/?cid=1", "place_id": "p1",
+        "campanha_cidade": "Alicante",  # coluna 20, contrato 2.3.0
     }
     base.update(over)
     return base
@@ -123,6 +124,7 @@ def _lead_nata(
     rodadas=2, texto_site=None, fora_do_ar=False, classe_site="proprio",
     campanha_id=("psicologos-teste", "CONFIRMADO_PRESENTE"), campanha_nicho=("Psicólogos", "CONFIRMADO_PRESENTE"),
     possivel_mesmo_negocio=(None, "CONFIRMADO_AUSENTE"), priorizacao=None,
+    campanha_cidade=("Alicante", "CONFIRMADO_PRESENTE"),
 ):
     problemas = []
     if fora_do_ar:
@@ -161,6 +163,8 @@ def _lead_nata(
         "campanha_id": {"valor": campanha_id[0], "estado": campanha_id[1]},
         "campanha_nicho": {"valor": campanha_nicho[0], "estado": campanha_nicho[1]},
         "possivel_mesmo_negocio": {"valor": possivel_mesmo_negocio[0], "estado": possivel_mesmo_negocio[1]},
+        # contrato 2.3.0 (multicidade)
+        "campanha_cidade": {"valor": campanha_cidade[0], "estado": campanha_cidade[1]},
         "priorizacao": priorizacao or {
             "autoritativo": False, "commercial_fit_score": 50, "priority": None, "contactability": None,
             "risks": None, "reasons": [], "website_opportunity_score": 40.0, "priority_score": 61.5,
@@ -647,6 +651,40 @@ def test_linha_nata_nome_generico_de_nicho_e_cidade_nao_e_falso_positivo(tmp_pat
     assert linha_lead["Ângulo"] == "poucas_avaliacoes"
     assert linha_lead["mensagem"] != ""
     assert "nome do negócio" not in linha_lead["Aviso"]
+
+
+@pytest.mark.parametrize("cidade,aceita", [("Elche", True), ("Alicante", False)])
+def test_linha_nata_palavras_genericas_usam_a_cidade_do_lead(tmp_path, cidade, aceita):
+    """Contrato 2.3.0 (multicidade), planilha_envio._linha_nata: a cidade que entra nas
+    palavras genéricas do validador é a `campanha_cidade` do LEAD. Modelo de teste que cita
+    "psicólogo en Elche" e lead "Psicólogo en Elche - Pedro Ficticio": com a cidade Elche,
+    "Elche" é genérica e a mensagem passa; com Alicante (controle), vira nome do negócio vazando."""
+    kwargs = _kwargs_comuns(tmp_path)
+    kwargs["mensagens_angulo"] = {
+        **_MENSAGENS_ANGULO,
+        "contato": _m("vi que es psicólogo en Elche y entré en su web desde el móvil.", "¿se la envío?"),
+    }
+    lead = _lead_nata(nome="Psicólogo en Elche - Pedro Ficticio", nicho="Psicólogo", telefone_na_pagina="texto",
+                      campanha_cidade=(cidade, "CONFIRMADO_PRESENTE"))
+    linha = montar_linhas_nata([lead], [], [], regras_angulo=_REGRAS_ANGULO, **kwargs)[0]
+    assert linha["Ângulo"] == "contato"
+    assert (linha["mensagem"] != "") is aceita
+    assert ("nome do negócio" in linha["Aviso"]) is not aceita
+
+
+@pytest.mark.parametrize("cidade,aceita", [("Elche", True), ("Alicante", False)])
+def test_linha_geral_palavras_genericas_usam_a_cidade_do_lead(tmp_path, cidade, aceita):
+    """Mesma regra do teste da Nata acima, na aba Geral (planilha_envio._linha_geral): lead
+    "Elche" (só a cidade) com modelo que cita "en Elche" passa com a cidade Elche na coluna
+    20 do CSV humano e é barrado com Alicante (controle)."""
+    kwargs = _kwargs_comuns(tmp_path)
+    kwargs["mensagens_angulo"] = {
+        **_MENSAGENS_ANGULO, "sem_site_sem_reputacao": _m("vi su ficha de Google en Elche.", "¿Le llegan más por Google?"),
+    }
+    linha = montar_linhas_geral([_linha_csv(nome="Elche", nota="", avaliacoes="", campanha_cidade=cidade)], **kwargs)[0]
+    assert linha["Ângulo"] == "sem_site"
+    assert (linha["Mensagem sugerida"] != "") is aceita
+    assert ("nome do negócio" in linha["Aviso"]) is not aceita
 
 
 def test_linha_nata_angulo_poucas_avaliacoes_concorrente_em_descartados_nao_qualifica():
@@ -1299,8 +1337,7 @@ def _kwargs_reais(diretorio_capturas):
     return kw
 
 
-def test_linha_nata_nome_inseguro_fica_sem_mensagem_e_marcada_para_revisar(tmp_path, monkeypatch):
-    monkeypatch.setattr(am, "carregar_cidade_campanha", lambda *a, **k: "Alicante")
+def test_linha_nata_nome_inseguro_fica_sem_mensagem_e_marcada_para_revisar(tmp_path):
     lead = _lead_nata(nome="Clínica Dental Ficticia 🦷 Su Sonrisa", nicho="Clínica dental", lcp_ms=12000,
                       psi_estado="CONFIRMADO_PRESENTE", rodadas=2)
     linha = montar_linhas_nata(
@@ -1313,8 +1350,7 @@ def test_linha_nata_nome_inseguro_fica_sem_mensagem_e_marcada_para_revisar(tmp_p
     assert "Benal" not in linha["WhatsApp"]  # sem mensagem no link
 
 
-def test_linha_nata_nome_limpo_sai_com_mensagem_nova(tmp_path, monkeypatch):
-    monkeypatch.setattr(am, "carregar_cidade_campanha", lambda *a, **k: "Alicante")
+def test_linha_nata_nome_limpo_sai_com_mensagem_nova(tmp_path):
     lead = _lead_nata(nome="Dental Brisa - Clínica Dental en Alicante", nicho="Clínica dental", lcp_ms=12000,
                       psi_estado="CONFIRMADO_PRESENTE", rodadas=2)
     linha = montar_linhas_nata(
@@ -1323,6 +1359,22 @@ def test_linha_nata_nome_limpo_sai_com_mensagem_nova(tmp_path, monkeypatch):
     assert "Abrí la web de Dental Brisa desde el móvil" in linha["mensagem"]
     assert linha["Status"] == ""
     assert "REVISAR" not in linha["Aviso"]
+
+
+@pytest.mark.parametrize("cidade,nome_na_mensagem", [
+    ("Elche", "Abrí la web de Dental Brisa desde"),             # cidade do lead Elche: corta
+    ("Alicante", "Abrí la web de Dental Brisa Elche desde"),    # controle: cidade do lead Alicante
+])
+def test_linha_nata_cidade_do_nome_curto_vem_do_lead(tmp_path, cidade, nome_na_mensagem):
+    """Contrato 2.3.0 (multicidade): a cidade cortada do fim do nome é a `campanha_cidade`
+    carimbada no lead."""
+    lead = _lead_nata(nome="Dental Brisa Elche", nicho="Clínica dental", lcp_ms=12000,
+                      psi_estado="CONFIRMADO_PRESENTE", rodadas=2,
+                      campanha_cidade=(cidade, "CONFIRMADO_PRESENTE"))
+    linha = montar_linhas_nata(
+        [lead], [], [], regras_angulo=am.carregar_regras_angulo(), **_kwargs_reais(tmp_path),
+    )[0]
+    assert nome_na_mensagem in linha["mensagem"]
 
 
 def test_linha_geral_sem_site_fora_da_saude_fica_sem_mensagem_e_marcada(tmp_path):
@@ -1366,6 +1418,9 @@ _COLUNAS_NATA_ANTES_DA_ETAPA_2 = (
     "site", "google_maps_url", "texto_site",
 ) + _DIRETOR_ANTES_DA_ETAPA_2 + ("Aviso", "Contexto para IA", "place_id")
 _COLUNAS_CAMPANHA_ETAPA_2 = ("campanha", "nicho", "prioridade_rotulo", "prioridade_score")
+# Contrato 2.3.0 (multicidade, 06/10/2026): mais uma no fim, depois das da Etapa 2.
+_COLUNAS_2_3_0 = ("cidade_conferida",)
+_COLUNAS_NO_FIM = _COLUNAS_CAMPANHA_ETAPA_2 + _COLUNAS_2_3_0
 
 
 def _so_acrescentou_no_fim(atuais, antigas, novas) -> bool:
@@ -1373,10 +1428,30 @@ def _so_acrescentou_no_fim(atuais, antigas, novas) -> bool:
 
 
 def test_colunas_de_campanha_no_fim_das_duas_abas_sem_mexer_nas_antigas():
-    assert pe.COLUNAS_CAMPANHA == _COLUNAS_CAMPANHA_ETAPA_2
-    assert _so_acrescentou_no_fim(COLUNAS_GERAL, _COLUNAS_GERAL_ANTES_DA_ETAPA_2, _COLUNAS_CAMPANHA_ETAPA_2)
-    assert _so_acrescentou_no_fim(COLUNAS_NATA, _COLUNAS_NATA_ANTES_DA_ETAPA_2, _COLUNAS_CAMPANHA_ETAPA_2)
+    assert pe.COLUNAS_CAMPANHA == _COLUNAS_NO_FIM
+    assert _so_acrescentou_no_fim(COLUNAS_GERAL, _COLUNAS_GERAL_ANTES_DA_ETAPA_2, _COLUNAS_NO_FIM)
+    assert _so_acrescentou_no_fim(COLUNAS_NATA, _COLUNAS_NATA_ANTES_DA_ETAPA_2, _COLUNAS_NO_FIM)
     assert COLUNAS_GERAL[0] == "pista" and COLUNAS_NATA[0] == "pista"
+    assert COLUNAS_GERAL[-1] == COLUNAS_NATA[-1] == "cidade_conferida"
+    assert COLUNAS_GERAL.count("cidade") == 1  # a "cidade" do endereço continua única na Geral
+
+
+def test_linha_geral_cidade_conferida_vem_da_coluna_20_do_csv(tmp_path):
+    """2.3.0: a "cidade_conferida" da Geral é a `campanha_cidade` do CSV humano, nunca a
+    "cidade" do endereço; CSV anterior sem a coluna -> NAO_VERIFICADO (controle)."""
+    [com] = montar_linhas_geral([_linha_csv(cidade="Molina de Segura", campanha_cidade="Murcia")],
+                                **_kwargs_comuns(tmp_path))
+    assert (com["cidade_conferida"], com["cidade"]) == ("Murcia", "Molina de Segura")
+    antiga = {k: v for k, v in _linha_csv().items() if k != "campanha_cidade"}
+    [sem] = montar_linhas_geral([antiga], **_kwargs_comuns(tmp_path))
+    assert sem["cidade_conferida"] == "NAO_VERIFICADO"
+
+
+def test_linha_nata_cidade_conferida_vem_do_contrato(tmp_path):
+    lead = _lead_nata(campanha_cidade=("Murcia", "CONFIRMADO_PRESENTE"))
+    assert _linha_nata_de(lead, tmp_path)["cidade_conferida"] == "Murcia"
+    antigo = _lead_nata(campanha_cidade=(None, "NAO_VERIFICADO"))
+    assert _linha_nata_de(antigo, tmp_path)["cidade_conferida"] == "NAO_VERIFICADO"
 
 
 @pytest.mark.parametrize("posicao", [0, 5, 20, 29])
@@ -1385,10 +1460,10 @@ def test_ordem_das_colunas_controle_negativo_coluna_no_meio_e_pega(posicao):
     (ou trocada de lugar), não só uma que falte."""
     inserida = list(COLUNAS_GERAL)
     inserida.insert(posicao, "coluna_intrusa")
-    assert not _so_acrescentou_no_fim(inserida, _COLUNAS_GERAL_ANTES_DA_ETAPA_2, _COLUNAS_CAMPANHA_ETAPA_2)
+    assert not _so_acrescentou_no_fim(inserida, _COLUNAS_GERAL_ANTES_DA_ETAPA_2, _COLUNAS_NO_FIM)
     trocada = list(COLUNAS_NATA)
     trocada[posicao], trocada[posicao + 1] = trocada[posicao + 1], trocada[posicao]
-    assert not _so_acrescentou_no_fim(trocada, _COLUNAS_NATA_ANTES_DA_ETAPA_2, _COLUNAS_CAMPANHA_ETAPA_2)
+    assert not _so_acrescentou_no_fim(trocada, _COLUNAS_NATA_ANTES_DA_ETAPA_2, _COLUNAS_NO_FIM)
 
 
 def _linha_csv_22(**over):
@@ -1509,8 +1584,7 @@ def test_linha_nata_sem_par_nao_gera_aviso(tmp_path):
     assert "mesmo negócio" not in _linha_nata_de(_lead_nata(), tmp_path)["Aviso"]
 
 
-def test_linha_nata_aviso_do_par_soma_com_revisar_nome(tmp_path, monkeypatch):
-    monkeypatch.setattr(am, "carregar_cidade_campanha", lambda *a, **k: "Alicante")
+def test_linha_nata_aviso_do_par_soma_com_revisar_nome(tmp_path):
     lead = _lead_nata(
         nome="Clínica Dental Ficticia 🦷 Su Sonrisa", nicho="Clínica dental", lcp_ms=12000,
         psi_estado="CONFIRMADO_PRESENTE",

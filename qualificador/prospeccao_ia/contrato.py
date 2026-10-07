@@ -20,7 +20,9 @@ from pathlib import Path
 # 2.1.0: acrescenta o campo opcional texto_site (MINOR, aditivo -- CONTRACT.md).
 # 2.2.0: acrescenta campanha_id, campanha_nicho e possivel_mesmo_negocio por lead, e
 #        campanha_id/campanha_nicho por descartado (CONTRACT.md, histórico de versões).
-CONTRACT_VERSION = "2.2.0"
+# 2.3.0: acrescenta campanha_cidade por lead e por descartado (multicidade: cidade do termo
+#        da busca validada pela lista do INE, ou cidade_padrao em lista sem termo).
+CONTRACT_VERSION = "2.3.0"
 QUALIFICADOR_VERSION = "1.1.0"
 SCHEMA_VERSION_INTERNO = "2.0"
 

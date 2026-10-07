@@ -87,7 +87,6 @@ except ModuleNotFoundError:  # pragma: no cover - bootstrap de sys.path
     import validador_mensagem
 
 import afirmacao
-import campanha
 from nome_comercial import nome_comercial_limpo
 
 _CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
@@ -276,13 +275,26 @@ def carregar_apresentacao(caminho: Path = CAMINHO_ABERTURAS_PADRAO) -> str:
     return texto
 
 
-def carregar_cidade_campanha() -> str:
-    """Cidade da campanha ativa (`EQC/config/campanha_ativa.json`, lida por
-    `campanha.py` -- a mesma do QUALIFICADOR). Substitui
-    `config/cidade_da_busca.json`, aposentado na Etapa 2 (diretor, 04/10/2026).
-    Campanha ausente ou inválida levanta `campanha.CampanhaInvalidaError` --
-    falha alta, nunca uma cidade vazia em silêncio."""
-    return campanha.cidade_da_campanha()
+_NAO_VERIFICADO = "NAO_VERIFICADO"
+
+
+def cidade_do_lead(lead) -> Optional[str]:
+    """Cidade da campanha no import do lead (contrato 2.3.0, multicidade):
+    `campanha_cidade` -- `CampoEvidencia` no lead do contrato (aba Nata) ou
+    texto na linha do CSV humano (aba Geral). Substitui a cidade da campanha
+    ativa e o `config/cidade_da_busca.json` (aposentado em 04/10/2026).
+    Ausente, vazia ou `NAO_VERIFICADO` = `None`: nunca uma cidade adivinhada
+    (`nome_curto_seguro` marca a linha para revisão)."""
+    campo = lead.get("campanha_cidade") if hasattr(lead, "get") else None
+    if campo is None:
+        return None
+    if hasattr(campo, "presente"):
+        if not campo.presente():
+            return None
+        texto = str(campo.valor_confirmado or "").strip()
+        return texto or None
+    texto = str(campo).strip()
+    return None if not texto or texto == _NAO_VERIFICADO else texto
 
 
 # --- preenchimento de placeholders ------------------------------------------
@@ -561,7 +573,9 @@ def _so_generico(nome: str, nicho: Optional[str], genericas: list) -> bool:
     return all(_sem_acentos(p).lower() in palavras for p in re.findall(r"\w+", nome))
 
 
-def nome_curto_seguro(nome: Optional[str], regras: dict, nicho: Optional[str] = None) -> str:
+def nome_curto_seguro(
+    nome: Optional[str], regras: dict, nicho: Optional[str] = None, cidade: Optional[str] = None,
+) -> str:
     """`{nombre}` da mensagem: o nome do Maps cortado no subtítulo
     (`nome_comercial_limpo`), SE o resultado for seguro -- senão
     `LinhaPedeRevisaoError`. Inseguro: vazio; reticências (nome truncado pelo
@@ -569,12 +583,18 @@ def nome_curto_seguro(nome: Optional[str], regras: dict, nicho: Optional[str] = 
     símbolo/emoji; só palavras genéricas (`nome_curto.palavras_genericas`,
     mais o nicho do lead) depois de tirar a cidade do fim; ou a cidade da
     campanha no MEIO do nome. A cidade no fim do nome é removida, não recusada
-    (diretor, 01/10/2026). Limites em `regras["nome_curto"]`."""
+    (diretor, 01/10/2026). Limites em `regras["nome_curto"]`. `cidade` é a da
+    campanha do lead (`cidade_do_lead`); sem ela a linha pede revisão -- nunca
+    uma cidade adivinhada."""
     cfg = regras.get("nome_curto") or {}
     max_palavras = cfg.get("max_palavras", 6)
     max_caracteres = cfg.get("max_caracteres", 45)
+    if not (cidade or "").strip():
+        raise LinhaPedeRevisaoError(
+            f"REVISAR NOME antes de enviar: {nome!r} -- a cidade da campanha do lead não foi verificada "
+            "(lead sem campanha_cidade), então o nome não pode ser limpo com segurança"
+        )
     limpo = (nome_comercial_limpo(nome) or "").strip()
-    cidade = carregar_cidade_campanha()  # campanha inválida: falha alta, nunca cidade vazia
     limpo = _sem_cidade_no_fim(limpo, cidade)
     motivos = []
     if not limpo:
@@ -716,7 +736,9 @@ def montar_mensagem_nata(
         modelo = mensagens[chave]
         _conferir_setor(modelo, identidade.get("nicho"), identidade.get("nome"), regras)
         if _usa_nombre(modelo):
-            valores["nombre"] = nome_curto_seguro(identidade.get("nome"), regras, identidade.get("nicho"))
+            valores["nombre"] = nome_curto_seguro(
+                identidade.get("nome"), regras, identidade.get("nicho"), cidade_do_lead(lead),
+            )
         return compor_mensagem(
             modelo, saudacao, apresentacao, incluir_consequencia=incluir_consequencia, **valores,
         )
@@ -842,7 +864,7 @@ def montar_mensagem_direta(
     _conferir_setor(modelo, linha_csv.get("nicho"), linha_csv.get("nome"), regras)
     if _usa_nombre(modelo):
         valores["nombre"] = entrada_derivada["nombre"] = nome_curto_seguro(
-            linha_csv.get("nome"), regras, linha_csv.get("nicho"),
+            linha_csv.get("nome"), regras, linha_csv.get("nicho"), cidade_do_lead(linha_csv),
         )
     mensagem = compor_mensagem(
         modelo, saudacao, apresentacao, incluir_consequencia=incluir_consequencia, **valores,

@@ -1,7 +1,8 @@
 {
-    "id": "arquitectos-alicante-2026-10",
+    "id": "arquitectos-2026-10",
     "nicho": "Arquitectos",
-    "cidade": "Alicante",
+    "cidade_padrao": "Alicante",
     "categorias_aceitas": ["arquitect"],
-    "categorias_excluidas": []
+    "categorias_excluidas": [],
+    "termos_de_busca": ["arquitect"]
 }

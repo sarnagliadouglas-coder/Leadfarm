@@ -203,9 +203,26 @@ def test_apresentacao_real_e_universal():
     setor nem menção a Google Business Profile (D12 Fases 1-3). Substitui os
     testes antigos de A/B (`carregar_aberturas`, variantes, segmento) --
     removidos com o mecanismo que testavam, não afrouxados."""
-    assert _APRESENTACAO_REAL == "Soy Douglas, hago webs aquí en Alicante."  # unificada em 03/10/2026 (diretor)
+    # unificada em 03/10/2026; sem cidade desde 06/10/2026 (diretor, multicidade)
+    assert _APRESENTACAO_REAL == "Soy Douglas, diseñador web."
     for termo in ("salud", "consultas", "pacientes", "psicólog", "médic", "ficha de Google", "{segment_positioning}"):
         assert termo not in _APRESENTACAO_REAL
+
+
+def test_nenhuma_apresentacao_situa_o_remetente_numa_cidade():
+    """Multicidade (diretor, 06/10/2026): o remetente não se apresenta como "aquí en <cidade>"
+    -- a apresentação global e a própria de cada modelo, com qualquer valor de placeholder."""
+    apresentacoes = [_APRESENTACAO_REAL] + [
+        _MENSAGENS_REAIS[c]["apresentacao"] for c in am.MODELOS
+        if isinstance(_MENSAGENS_REAIS.get(c), dict) and "apresentacao" in _MENSAGENS_REAIS[c]
+    ]
+    assert len(apresentacoes) > 1  # a lista não está vazia por engano
+    for texto in apresentacoes:
+        baixo = texto.lower()
+        assert "aquí" not in baixo and "aqui" not in baixo, texto
+        assert " en " not in f" {baixo} ", texto  # "... en <cidade>"
+        for cidade in ("alicante", "alacant", "murcia", "elche", "elx", "valencia", "madrid"):
+            assert cidade not in baixo, texto
 
 
 def test_carregar_apresentacao_arquivo_sem_chave_levanta_erro(tmp_path):

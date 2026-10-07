@@ -1,21 +1,22 @@
-"""campanha.py — leitura da campanha ativa do lado do COMERCIAL (Etapa 2, 2.4).
+"""campanha.py — validação da campanha do lado do COMERCIAL (Etapa 2, 2.4; multicidade, 06/10/2026).
 
-O arquivo é o MESMO que o QUALIFICADOR lê no import: `<eqc_root>/config/campanha_ativa.json`
-(configuração compartilhada, formato em `EQC/INDEX.md` §3-C). Resolução igual à de
-`qualificador/prospeccao_ia/campanha.py`, com a raiz do EQC vinda de `eqc.eqc_root()` —
-nenhum caminho absoluto de máquina. A env `COMERCIAL_CAMPANHA` (caminho final do arquivo)
-vence; existe para teste apontar uma campanha em `tmp_path`, não para a operação.
+O formato é o MESMO que o QUALIFICADOR lê no import (`EQC/config/campanhas/*.json` e
+`EQC/config/campanha_ativa.json`; formato em `EQC/INDEX.md` §3-C). Resolução do arquivo ativo
+igual à de `qualificador/prospeccao_ia/campanha.py`, com a raiz do EQC vinda de
+`eqc.eqc_root()` — nenhum caminho absoluto de máquina. A env `COMERCIAL_CAMPANHA` (caminho
+final do arquivo) vence; existe para teste, não para a operação.
 
-Substitui `config/cidade_da_busca.json` (aposentado na Etapa 2): a cidade usada no nome
-curto (`angulo_mensagem.nome_curto_seguro`) e nas palavras genéricas do validador passa a
-ser a `cidade` da campanha ativa. Trocar de cidade = trocar a campanha ativa, sem tocar o
-COMERCIAL.
+Desde o contrato 2.3.0 (multicidade) o COMERCIAL não precisa mais ler campanha para montar a
+planilha: a cidade de cada lead chega no próprio lead (`campanha_cidade`, contrato na Nata e
+CSV humano na Geral). Este módulo continua como a cópia do COMERCIAL da validação da
+campanha (os módulos não importam código um do outro) — `tests/test_campanha_sincronia.py`
+falha se ela divergir da do QUALIFICADOR.
 
 Campanha ausente, JSON inválido ou campo mínimo faltando/errado => `CampanhaInvalidaError`
-(falha alta, nunca um default silencioso). Os campos mínimos conferidos são os mesmos do
-QUALIFICADOR (`id`, `nicho`, `cidade`, `categorias_aceitas`, `categorias_excluidas`), para
-que os dois lados nunca discordem sobre o que é uma campanha válida. Campos extras são
-aceitos e ignorados aqui. Só leitura; $0, sem LLM.
+(falha alta, nunca um default silencioso). Os campos conferidos são os mesmos do
+QUALIFICADOR (`id`, `nicho`, `cidade_padrao`, `categorias_aceitas`, `categorias_excluidas` e,
+quando presente, `termos_de_busca`). Campos extras são aceitos e ignorados aqui. Só leitura;
+$0, sem LLM.
 """
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ _CAMPANHA_REL = ("config", "campanha_ativa.json")
 
 
 class CampanhaInvalidaError(Exception):
-    """Campanha ativa ausente ou inválida. Falha alta: nenhuma mensagem é montada sem ela."""
+    """Campanha ativa ausente ou inválida. Falha alta."""
 
 
 def caminho_campanha() -> Path:
@@ -70,10 +71,12 @@ def validar_campanha(dados, origem="campanha") -> dict:
     if not isinstance(dados, dict):
         raise CampanhaInvalidaError(f"{origem}: o conteúdo deve ser um objeto JSON.")
     erros = []
-    for campo in ("id", "nicho", "cidade"):
+    for campo in ("id", "nicho", "cidade_padrao"):
         _texto_obrigatorio(dados, campo, erros)
     _lista_de_termos(dados, "categorias_aceitas", erros, pode_ser_vazia=False)
     _lista_de_termos(dados, "categorias_excluidas", erros, pode_ser_vazia=True)
+    if "termos_de_busca" in dados:
+        _lista_de_termos(dados, "termos_de_busca", erros, pode_ser_vazia=False)
     if erros:
         raise CampanhaInvalidaError(f"{origem}: campanha ativa inválida -- " + "; ".join(erros) + ".")
     return dados
@@ -93,8 +96,3 @@ def carregar_campanha(caminho: Optional[Path] = None) -> dict:
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
         raise CampanhaInvalidaError(f"Campanha ativa em '{caminho}' não é JSON válido ({e}).") from e
     return validar_campanha(dados, origem=str(caminho))
-
-
-def cidade_da_campanha(caminho: Optional[Path] = None) -> str:
-    """`cidade` da campanha ativa (texto não vazio -- garantido pela validação)."""
-    return carregar_campanha(caminho)["cidade"].strip()

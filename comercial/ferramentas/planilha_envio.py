@@ -77,13 +77,9 @@ NOME_PLANILHA_CONSOLIDADA = "planilha_envio_consolidada.xlsx"
 _RE_TIMESTAMP = re.compile(r"(\d{8}-\d{6})")
 _RE_PROFISSIONAL = re.compile(r"^\s*(?:dr\.?|dra\.?|doctor|doctora)\b", re.IGNORECASE)
 
-COLUNAS_CSV_HUMANO = (
-    "pista", "motivo", "nome", "nicho", "cidade", "telefone", "email", "instagram", "site",
-    "classe_site", "avaliacoes", "nota", "google_maps_url", "place_id",
-    # 15-19: acrescentadas pelo QUALIFICADOR no contrato 2.2.0 (EQC/contracts/CONTRACT.md,
-    # seção do CSV humano). CSV humano anterior não as tem -- ver `_campos_campanha_geral`.
-    "campanha_id", "campanha_nicho", "possivel_mesmo_negocio", "prioridade_rotulo", "prioridade_score",
-)
+# Colunas do CSV humano: referência normativa em EQC/contracts/CONTRACT.md (seção do CSV
+# humano). As colunas 15-20 (contratos 2.2.0 e 2.3.0) faltam em CSV antigo -- ver
+# `_campos_campanha_geral`.
 
 # Valor do contrato para "não sabemos" -- nunca inventado, nunca convertido em deficiência.
 NAO_VERIFICADO = "NAO_VERIFICADO"
@@ -130,7 +126,11 @@ COLUNAS_DIRETOR = (
 # Google; "prioridade_*" são a prioridade da Onda 1 como veio do QUALIFICADOR,
 # NÃO autoritativa (aviso na aba "Como usar"). Os mesmos nomes são lidos por
 # `registro_abordagens.py`.
-COLUNAS_CAMPANHA = ("campanha", "nicho", "prioridade_rotulo", "prioridade_score")
+# Contrato 2.3.0 (multicidade, diretor 06/10/2026): "cidade_conferida" no FIM =
+# a cidade da campanha no import (`campanha_cidade`: a do termo da busca,
+# conferida na lista do INE, ou a cidade_padrao). Nome escolhido pelo diretor:
+# a aba Geral já tem "cidade" (a do endereço da ficha).
+COLUNAS_CAMPANHA = ("campanha", "nicho", "prioridade_rotulo", "prioridade_score", "cidade_conferida")
 
 COLUNAS_GERAL = (
     "pista", "motivo", "nome", "cidade", "telefone", "WhatsApp", "email", "Abrir e-mail", "Canal",
@@ -179,8 +179,16 @@ _COMO_USAR_TEXTO = (
     ),
     (
         "Campanha e nicho",
-        '"campanha" e "nicho" são a campanha ativa no momento em que o lead foi importado (o nicho da '
+        '"campanha" e "nicho" são a campanha usada quando o lead foi importado -- a escolhida pelo termo '
+        'da busca ou, em lista sem termo, a ativa do menu (o nicho da '
         'campanha, não a categoria do Google). "NAO_VERIFICADO" = lead importado antes da campanha existir.',
+    ),
+    (
+        "Cidade conferida",
+        '"cidade_conferida" é a cidade da busca que gerou a lista, conferida na lista oficial de '
+        'municípios (INE) -- ou a cidade padrão da campanha, em lista sem termo de busca. É a cidade usada para '
+        'limpar o nome do negócio na mensagem. A coluna "cidade" (aba Geral) é outra coisa: a cidade do '
+        'endereço da ficha.',
     ),
     (
         "Canal",
@@ -422,6 +430,7 @@ def _campos_campanha_geral(lead: dict) -> dict:
         "nicho": _valor_csv(lead, "campanha_nicho", NAO_VERIFICADO),
         "prioridade_rotulo": _valor_csv(lead, "prioridade_rotulo", ""),
         "prioridade_score": _valor_csv(lead, "prioridade_score", ""),
+        "cidade_conferida": _valor_csv(lead, "campanha_cidade", NAO_VERIFICADO),
     }
 
 
@@ -558,7 +567,7 @@ def _linha_geral(
             linha["Aviso"] = "; ".join(filter(None, [linha["Aviso"], str(e)]))
         resultado_validacao = None if mensagem is None else angulo_mensagem.validar_mensagem_angulo(
             mensagem, angulo, entrada_derivada, nome_negocio=lead.get("nome"), config_validacao=config_validacao,
-            palavras_genericas_nome=angulo_mensagem.palavras_genericas_nome(angulo_mensagem.carregar_cidade_campanha()),
+            palavras_genericas_nome=angulo_mensagem.palavras_genericas_nome(angulo_mensagem.cidade_do_lead(lead)),
         )
         if resultado_validacao is None:
             pass
@@ -618,6 +627,7 @@ def _campos_campanha_nata(lead) -> dict:
         "nicho": _texto_de_evidencia(lead.campanha_nicho),
         "prioridade_rotulo": "" if rotulo is None else rotulo,
         "prioridade_score": "" if score is None else score,
+        "cidade_conferida": _texto_de_evidencia(lead.campanha_cidade),
     }
 
 
@@ -745,7 +755,7 @@ def _linha_nata(
             mensagem, angulo, entrada_derivada, nome_negocio=lead["identidade"]["nome"],
             config_validacao=config_validacao,
             palavras_genericas_nome=angulo_mensagem.palavras_genericas_nome(
-                lead["identidade"]["nicho"], angulo_mensagem.carregar_cidade_campanha(),
+                lead["identidade"]["nicho"], angulo_mensagem.cidade_do_lead(lead),
             ),
         )
         if resultado_validacao is None:

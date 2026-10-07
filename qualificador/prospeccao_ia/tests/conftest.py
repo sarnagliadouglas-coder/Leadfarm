@@ -111,7 +111,7 @@ def _isolar_persistencia_de_dados(tmp_path, monkeypatch, _campanha_teste_path):
 CAMPANHA_TESTE = {
     "id": "campanha-teste",
     "nicho": "Fisioterapeutas (teste)",
-    "cidade": "Cidade Ficticia",
+    "cidade_padrao": "Cidade Ficticia",
     "categorias_aceitas": ["fisioterap"],
     "categorias_excluidas": [],
 }

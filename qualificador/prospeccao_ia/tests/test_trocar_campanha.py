@@ -9,14 +9,14 @@ import campanha
 import trocar_campanha
 
 CAMPANHAS = {
-    "psicologos.json": {"id": "psicologos-x", "nicho": "Psicólogos", "cidade": "Alicante",
+    "psicologos.json": {"id": "psicologos-x", "nicho": "Psicólogos", "cidade_padrao": "Alicante",
                         "categorias_aceitas": ["psicólog"], "categorias_excluidas": []},
-    "abogados.json": {"id": "abogados-x", "nicho": "Abogados", "cidade": "Alicante",
+    "abogados.json": {"id": "abogados-x", "nicho": "Abogados", "cidade_padrao": "Alicante",
                       "categorias_aceitas": ["abogad", "bufete"], "categorias_excluidas": []},
-    "arquitectos.json": {"id": "arquitectos-x", "nicho": "Arquitectos", "cidade": "Alicante",
+    "arquitectos.json": {"id": "arquitectos-x", "nicho": "Arquitectos", "cidade_padrao": "Elche",
                          "categorias_aceitas": ["arquitect"], "categorias_excluidas": []},
 }
-ATIVA_INICIAL = (b'{"id": "antiga", "nicho": "Antigo", "cidade": "Lugar", '
+ATIVA_INICIAL = (b'{"id": "antiga", "nicho": "Antigo", "cidade_padrao": "Lugar", '
                  b'"categorias_aceitas": ["x"], "categorias_excluidas": []}\n')
 
 
@@ -101,6 +101,22 @@ def test_menu_marca_a_ativa(ambiente):
     linha = [ln for ln in tela.splitlines() if "arquitectos-x" in ln][0]
     assert "ativa agora" in linha
     assert sum("ativa agora" in ln for ln in tela.splitlines()) == 1
+
+
+def test_menu_mostra_o_nicho_e_a_cidade_padrao(ambiente):
+    """Multicidade (06/10/2026): o menu escolhe o nicho; a cidade padrão aparece como tal."""
+    _, tela = _rodar("\n")
+    linha = [ln for ln in tela.splitlines() if "arquitectos-x" in ln][0]
+    assert "Arquitectos (cidade padrão Elche)" in linha
+
+
+def test_campanha_no_formato_antigo_com_cidade_e_recusada(ambiente):
+    """Arquivo com `cidade` e sem `cidade_padrao` (formato anterior à multicidade) não vale."""
+    pasta, ativa = ambiente
+    antigo = {k: v for k, v in CAMPANHAS["abogados.json"].items() if k != "cidade_padrao"}
+    (pasta / "abogados.json").write_text(json.dumps({**antigo, "cidade": "Alicante"}), encoding="utf-8")
+    codigo, tela = _rodar("1\n")
+    assert codigo == 1 and ativa.read_bytes() == ATIVA_INICIAL and "Nada foi alterado" in tela
 
 
 def test_falha_de_gravacao_restaura(ambiente, monkeypatch):

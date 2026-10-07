@@ -62,12 +62,50 @@ def test_sidecar_ausente_nao_falha_so_avisa(tmp_path):
     assert avisos and "ausente" in avisos[0]
 
 
-def test_sidecar_schema_version_2_levanta(tmp_path):
+# Meta v2 (Tarefa 3, 06/10/2026) substituiu "schema_version 2 levanta": a regra agora é
+# "versão fora de (1, 2) levanta" -- o controle negativo continua, com 3, 0, "2" e True.
+@pytest.mark.parametrize("versao", [3, 0, None, "2", True])
+def test_sidecar_schema_version_fora_do_contrato_levanta(tmp_path, versao):
     csv_path = _escrever_csv(tmp_path, HEADER_COMPLETO, [_uma_linha()],
-                             sidecar={"schema_version": 2, "plataforma": "google"})
+                             sidecar={"schema_version": versao, "plataforma": "google",
+                                      "termo_busca": None, "termo_busca_origem": "ausente"})
     with pytest.raises(csv_contrato.ContratoCsvInvalido) as exc:
         csv_contrato.validar_sidecar(str(csv_path))
-    assert "schema_version=2" in str(exc.value) and "suporta 1" in str(exc.value)
+    assert f"schema_version={versao!r}" in str(exc.value) and "suporta 1 ou 2" in str(exc.value)
+
+
+@pytest.mark.parametrize("termo,origem", [
+    ("psicólogo alicante", "url"), ("psicologo alicante", "caixa_de_busca"), (None, "ausente"),
+])
+def test_sidecar_v2_com_termo_coerente_passa(tmp_path, termo, origem):
+    csv_path = _escrever_csv(tmp_path, HEADER_COMPLETO, [_uma_linha()],
+                             sidecar={"schema_version": 2, "termo_busca": termo, "termo_busca_origem": origem})
+    sc, avisos = csv_contrato.validar_sidecar(str(csv_path))
+    assert sc["termo_busca"] == termo and avisos == []
+
+
+@pytest.mark.parametrize("extra,trecho", [
+    ({}, "faltam"),
+    ({"termo_busca": "psicólogo alicante"}, "faltam"),
+    ({"termo_busca": "x", "termo_busca_origem": "teclado"}, "fora de"),
+    ({"termo_busca": "   ", "termo_busca_origem": "url"}, "texto não vazio"),
+    ({"termo_busca": 7, "termo_busca_origem": "url"}, "texto não vazio"),
+    ({"termo_busca": None, "termo_busca_origem": "url"}, "incoerente"),
+    ({"termo_busca": "psicólogo alicante", "termo_busca_origem": "ausente"}, "incoerente"),
+])
+def test_sidecar_v2_sem_termo_valido_levanta(tmp_path, extra, trecho):
+    csv_path = _escrever_csv(tmp_path, HEADER_COMPLETO, [_uma_linha()],
+                             sidecar={"schema_version": 2, **extra})
+    with pytest.raises(csv_contrato.ContratoCsvInvalido) as exc:
+        csv_contrato.validar_sidecar(str(csv_path))
+    assert trecho in str(exc.value)
+
+
+def test_sidecar_v1_nao_exige_termo(tmp_path):
+    """Controle: os campos do termo são exigência só do v2."""
+    csv_path = _escrever_csv(tmp_path, HEADER_COMPLETO, [_uma_linha()], sidecar={"schema_version": 1})
+    sc, _ = csv_contrato.validar_sidecar(str(csv_path))
+    assert "termo_busca" not in sc
 
 
 def test_sidecar_schema_version_1_passa(tmp_path):

@@ -32,7 +32,7 @@ _QUALIFICADOR_CAMPANHA = (
 _VALIDA = {
     "id": "teste-sincronia",
     "nicho": "Teste",
-    "cidade": "Alicante",
+    "cidade_padrao": "Alicante",
     "categorias_aceitas": ["teste"],
     "categorias_excluidas": [],
 }
@@ -41,9 +41,10 @@ _CAMPOS = tuple(_VALIDA)
 
 def carregar_modulo_isolado(caminho: Path, nome: str):
     """Carrega um `campanha.py` pelo caminho, sem tocar `sys.modules` de fora: o import de
-    `contrato`/`eqc` que o arquivo faz recebe um módulo de mentira só durante a carga."""
+    `contrato`/`eqc`/`municipios` que o arquivo faz recebe um módulo de mentira só durante a
+    carga (a validação comparada aqui não usa nenhum dos três)."""
     falsos = {}
-    for dep in ("contrato", "eqc"):
+    for dep in ("contrato", "eqc", "municipios"):
         falso = types.ModuleType(dep)
         falso.eqc_root = lambda: Path("EQC-de-mentira")
         falsos[dep] = falso
@@ -74,6 +75,12 @@ def _casos():
                               ("lista vazia", []), ("lista com vazio", ["ok", ""]),
                               ("lista com int", ["ok", 3]), ("objeto", {"a": 1})):
             casos.append((f"{campo} = {rotulo}", {**_VALIDA, campo: copy.deepcopy(valor)}))
+    # `termos_de_busca` (Tarefa 3, 06/10/2026): opcional; se presente, mesma regra de
+    # `categorias_aceitas` (lista com pelo menos um texto não vazio).
+    casos.append(("termos_de_busca valido", {**_VALIDA, "termos_de_busca": ["psicolog"]}))
+    for rotulo, valor in (("None", None), ("int", 7), ("texto", "psicolog"), ("lista vazia", []),
+                          ("lista com vazio", ["ok", ""]), ("lista com int", ["ok", 3]), ("objeto", {"a": 1})):
+        casos.append((f"termos_de_busca = {rotulo}", {**_VALIDA, "termos_de_busca": copy.deepcopy(valor)}))
     casos += [
         ("raiz é lista", [_VALIDA]),
         ("raiz é texto", "campanha"),
@@ -169,3 +176,19 @@ def test_controle_negativo_regra_divergente_e_detectada(tmp_path):
     divergencias = comparar_validacoes(comercial, divergente, casos_dir)
     assert any(d.startswith("sem categorias_excluidas") for d in divergencias)
     assert any(d.startswith("categorias_excluidas = None") for d in divergencias)
+
+
+def test_controle_negativo_termos_de_busca_sem_validacao_e_detectado(tmp_path):
+    """Uma cópia que deixa de validar `termos_de_busca` (Tarefa 3) tem de ser pega."""
+    fonte = _COMERCIAL_CAMPANHA.read_text(encoding="utf-8")
+    alvo = 'if "termos_de_busca" in dados:'
+    assert fonte.count(alvo) == 1
+    copia = tmp_path / "campanha_sem_termos.py"
+    copia.write_text(fonte.replace(alvo, "if False:"), encoding="utf-8")
+    comercial = carregar_modulo_isolado(_COMERCIAL_CAMPANHA, "_campanha_comercial")
+    divergente = carregar_modulo_isolado(copia, "_campanha_sem_termos")
+    casos_dir = tmp_path / "casos"
+    casos_dir.mkdir()
+    divergencias = comparar_validacoes(comercial, divergente, casos_dir)
+    assert any(d.startswith("termos_de_busca = lista vazia") for d in divergencias)
+    assert not any(d.startswith("termos_de_busca valido") for d in divergencias)

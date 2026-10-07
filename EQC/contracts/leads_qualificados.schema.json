@@ -2,14 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://eqc.local/contracts/leads_qualificados.schema.json",
   "title": "Contrato QUALIFICADOR -> COMERCIAL",
-  "description": "Schema formal do JSON produzido pelo QUALIFICADOR e consumido pelo COMERCIAL. Versão 2.2.0 — acrescenta por lead os campos obrigatórios campanha_id, campanha_nicho e possivel_mesmo_negocio, e por descartado campanha_id e campanha_nicho (carimbo da campanha ativa no import e aviso do filtro de redes), sobre a 2.1.0 (campo opcional texto_site) e a base 2.0.0 (separa nata e candidatos_triagem e transporta sinais renderizados do site). Qualquer mudança no conjunto de chaves obrigatórias exige incrementar contract_version (semver).",
+  "description": "Schema formal do JSON produzido pelo QUALIFICADOR e consumido pelo COMERCIAL. Versão 2.3.0 — acrescenta por lead e por descartado o campo obrigatório campanha_cidade (cidade da campanha no import: a do termo da busca, validada pela lista oficial de municípios do INE, ou a cidade_padrao da campanha em lista sem termo), sobre a 2.2.0 (por lead campanha_id, campanha_nicho e possivel_mesmo_negocio; por descartado campanha_id e campanha_nicho), a 2.1.0 (campo opcional texto_site) e a base 2.0.0 (separa nata e candidatos_triagem e transporta sinais renderizados do site). Qualquer mudança no conjunto de chaves obrigatórias exige incrementar contract_version (semver).",
   "type": "object",
   "required": ["contract_version", "schema_version", "generated_at", "stats", "nata", "candidatos_triagem", "descartados"],
   "additionalProperties": false,
   "properties": {
     "contract_version": {
       "type": "string",
-      "const": "2.2.0",
+      "const": "2.3.0",
       "description": "Versão do CONTRATO externo (o que o COMERCIAL deve checar). Muda só quando o conjunto de campos do payload muda."
     },
     "schema_version": {
@@ -123,7 +123,7 @@
       "type": "object",
       "required": [
         "place_id", "estagio_analise", "identidade", "contato", "classe_site",
-        "problema_vendavel", "campanha_id", "campanha_nicho", "possivel_mesmo_negocio",
+        "problema_vendavel", "campanha_id", "campanha_nicho", "campanha_cidade", "possivel_mesmo_negocio",
         "reputacao", "presenca_digital", "gbp_diagnostico", "gbp_campos_crus",
         "evidencias_qualificador", "priorizacao", "analise_tecnica_site", "psi"
       ],
@@ -142,11 +142,15 @@
 
         "campanha_id": {
           "$ref": "#/$defs/campo_texto_import",
-          "description": "Adicionado em 2.2.0. id da campanha ativa (EQC/config/campanha_ativa.json) no momento em que o lead foi importado; nunca re-carimbado. NAO_VERIFICADO (valor null) em lead importado antes de 2.2.0."
+          "description": "Adicionado em 2.2.0. id da campanha (uma por nicho, EQC/config/campanhas/) usada no import do lead: a escolhida pelo termo da busca ou, em lista sem termo, a ativa do menu (EQC/config/campanha_ativa.json); nunca re-carimbado. NAO_VERIFICADO (valor null) em lead importado antes de 2.2.0."
         },
         "campanha_nicho": {
           "$ref": "#/$defs/campo_texto_import",
           "description": "Adicionado em 2.2.0. Rótulo humano do nicho da campanha ativa no import (campo 'nicho' da campanha). NAO_VERIFICADO (valor null) em lead importado antes de 2.2.0."
+        },
+        "campanha_cidade": {
+          "$ref": "#/$defs/campo_texto_import",
+          "description": "Adicionado em 2.3.0. Cidade da campanha no import: o município do termo da busca, na grafia oficial do INE da forma digitada (ex.: 'Alacant' ou 'Alicante'), ou a cidade_padrao da campanha em lista sem termo de busca. Nunca re-carimbado. NAO_VERIFICADO (valor null) em lead importado antes de 2.3.0."
         },
         "possivel_mesmo_negocio": { "$ref": "#/$defs/campo_possivel_mesmo_negocio" },
 
@@ -394,17 +398,21 @@
 
     "descartado": {
       "type": "object",
-      "required": ["place_id", "identidade", "motivo", "campos_do_corte", "campanha_id", "campanha_nicho"],
+      "required": ["place_id", "identidade", "motivo", "campos_do_corte", "campanha_id", "campanha_nicho", "campanha_cidade"],
       "additionalProperties": false,
       "properties": {
         "place_id": { "type": ["string", "null"] },
         "campanha_id": {
           "$ref": "#/$defs/campo_texto_import",
-          "description": "Adicionado em 2.2.0. Campanha ativa no import do lead descartado; NAO_VERIFICADO (null) se anterior a 2.2.0."
+          "description": "Adicionado em 2.2.0. Campanha usada no import do lead descartado (mesma regra do lead: a escolhida pelo termo da busca ou, em lista sem termo, a ativa do menu); NAO_VERIFICADO (null) se anterior a 2.2.0."
         },
         "campanha_nicho": {
           "$ref": "#/$defs/campo_texto_import",
           "description": "Adicionado em 2.2.0. Nicho da campanha ativa no import do lead descartado; NAO_VERIFICADO (null) se anterior a 2.2.0."
+        },
+        "campanha_cidade": {
+          "$ref": "#/$defs/campo_texto_import",
+          "description": "Adicionado em 2.3.0. Cidade da campanha no import do lead descartado (mesma regra do lead); NAO_VERIFICADO (null) se anterior a 2.3.0."
         },
         "identidade": {
           "type": "object",

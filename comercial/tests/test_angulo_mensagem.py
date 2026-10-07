@@ -719,11 +719,15 @@ def test_carregar_mensagens_angulo_le_o_arquivo_real():
         assert chave in config
 
 
-def test_carregar_cidade_campanha_le_o_arquivo_real_do_eqc(monkeypatch):
-    """Sem a env de teste, lê a campanha ativa real (EQC/config/campanha_ativa.json)."""
+def test_campanha_ativa_real_do_eqc_valida_no_formato_atual(monkeypatch):
+    """Sem a env de teste, a campanha ativa real (EQC/config/campanha_ativa.json) valida
+    na cópia do COMERCIAL da validação (formato multicidade, com `cidade_padrao`). Desde o
+    contrato 2.3.0 a cidade da mensagem vem do lead, não daqui."""
+    import campanha
+
     monkeypatch.delenv("COMERCIAL_CAMPANHA", raising=False)
-    cidade = am.carregar_cidade_campanha()
-    assert isinstance(cidade, str) and cidade.strip()
+    dados = campanha.carregar_campanha()
+    assert dados["cidade_padrao"].strip()
 
 
 def test_carregar_regras_angulo_arquivo_ausente_levanta_erro_claro(tmp_path):
@@ -738,12 +742,12 @@ def test_carregar_mensagens_angulo_sem_chaves_exigidas_levanta_erro(tmp_path):
         am.carregar_mensagens_angulo(caminho)
 
 
-def test_carregar_cidade_campanha_arquivo_ausente_levanta_erro_claro(tmp_path, monkeypatch):
+def test_campanha_ativa_ausente_levanta_erro_claro(tmp_path, monkeypatch):
     import campanha
 
     monkeypatch.setenv("COMERCIAL_CAMPANHA", str(tmp_path / "nao-existe.json"))
     with pytest.raises(campanha.CampanhaInvalidaError, match="não encontrada"):
-        am.carregar_cidade_campanha()
+        campanha.carregar_campanha()
 
 
 # --- tipo de CTA por ângulo (D12 Fase 5, 29/09/2026) -------------------------

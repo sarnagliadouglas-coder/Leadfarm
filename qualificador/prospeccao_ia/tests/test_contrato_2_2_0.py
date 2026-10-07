@@ -21,9 +21,10 @@ def _doc(com_site, reprovados=()):
     return oj.montar([], list(com_site), list(reprovados))
 
 
-def test_versao_do_codigo_bate_com_o_const_do_schema_e_e_2_2_0():
-    assert contrato.CONTRACT_VERSION == "2.2.0"
-    assert contrato.carregar_schema()["properties"]["contract_version"]["const"] == "2.2.0"
+def test_versao_do_codigo_bate_com_o_const_do_schema():
+    # 2.3.0 desde 06/10/2026 (campanha_cidade, multicidade); os campos da 2.2.0 continuam.
+    assert contrato.CONTRACT_VERSION == "2.3.0"
+    assert contrato.carregar_schema()["properties"]["contract_version"]["const"] == "2.3.0"
 
 
 def test_lead_novo_carrega_o_carimbo_confirmado_e_valida():
@@ -92,13 +93,13 @@ def test_schema_2_2_0_recusa_documento_invalido(mutacao):
         contrato.validar(doc)
 
 
-def test_fase_saida_grava_2_2_0_com_carimbo(tmp_path, monkeypatch):
+def test_fase_saida_grava_a_versao_vigente_com_carimbo(tmp_path, monkeypatch):
     import main as main_mod
     registro = _nata(**CARIMBO, possivel_mesmo_negocio=[])
     (tmp_path / "leads_com_site.json").write_text(json.dumps([registro]), encoding="utf-8")
     main_mod.fase_saida()
     saida_dir = tmp_path / "_saida"
     [arquivo] = [p for p in saida_dir.iterdir() if not p.name.endswith(".meta.json")]
-    assert arquivo.name.endswith("_v2.2.0.json")
+    assert arquivo.name.endswith("_v2.3.0.json")
     doc = json.loads(arquivo.read_text(encoding="utf-8"))
     assert doc["nata"][0]["campanha_id"]["valor"] == "camp-teste"

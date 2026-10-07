@@ -28,7 +28,7 @@
     "cta": "¿Suelen pedir a los clientes que les dejen una reseña?"
   },
   "lentidao": {
-    "apresentacao": "Soy Douglas, hago webs aquí en Alicante.",
+    "apresentacao": "Soy Douglas, diseñador web.",
     "fato": "abrí la web de {nombre} desde el móvil y tardó unos {segundos} segundos en mostrar el contenido.",
     "consequencia": "Mucha gente que busca desde el móvil no espera tanto y pasa al siguiente resultado de Google.",
     "cta": "Le he apuntado lo que vi y algunas ideas para mejorarlo. ¿Se lo paso por aquí?",
@@ -43,7 +43,7 @@
     "cta": "Si le sirve, puedo prepararle una revisión breve con lo que he encontrado, ¿se la envío?"
   },
   "lentidao_moderada": {
-    "apresentacao": "Soy Douglas, hago webs aquí en Alicante.",
+    "apresentacao": "Soy Douglas, diseñador web.",
     "fato": "abrí la web de {nombre} desde el móvil y tardó unos {segundos} segundos en cargar.",
     "consequencia": "No es grave, pero en el móvil se nota y suele tener arreglo fácil.",
     "cta": "Si quiere, le paso lo que vi. ¿Se lo envío?",
@@ -53,7 +53,7 @@
     }
   },
   "defeito_visivel": {
-    "apresentacao": "Soy Douglas, hago webs aquí en Alicante.",
+    "apresentacao": "Soy Douglas, diseñador web.",
     "fato": "revisando su web vi que aparece el correo \"{texto_encontrado}\", que parece un texto de la plantilla que quedó sin cambiar.",
     "consequencia": "Si un {cliente_paciente} intenta escribirles ahí, el correo no les llega.",
     "cta": "Se lo comento por si no lo sabían. Si quiere, le paso un par de detalles más que vi.",
@@ -64,7 +64,7 @@
     }
   },
   "sem_site": {
-    "apresentacao": "Soy Douglas, hago webs aquí en Alicante.",
+    "apresentacao": "Soy Douglas, diseñador web.",
     "exige_setor_saude": true,
     "fato": "vi su ficha en Google: un {nota} con {n} reseñas, se nota que sus pacientes están contentos.",
     "consequencia": "Pero quien quiere ver tratamientos o cómo funciona la primera cita antes de llamar no tiene una web a la que ir.",

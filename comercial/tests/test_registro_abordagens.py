@@ -378,6 +378,8 @@ def test_ponta_a_ponta_gerar_preencher_registrar_e_excluir_na_proxima_planilha(t
             "campanha_id": {"valor": "psicologos-teste", "estado": "CONFIRMADO_PRESENTE"},
             "campanha_nicho": {"valor": "Psicólogos", "estado": "CONFIRMADO_PRESENTE"},
             "possivel_mesmo_negocio": {"valor": None, "estado": "CONFIRMADO_AUSENTE"},
+            # contrato 2.3.0 (multicidade)
+            "campanha_cidade": {"valor": "Murcia", "estado": "CONFIRMADO_PRESENTE"},
             "priorizacao": {
                 "autoritativo": False, "commercial_fit_score": 50, "priority": None, "contactability": None,
                 "risks": None, "reasons": [], "website_opportunity_score": 40.0, "priority_score": 61.5,
@@ -450,6 +452,9 @@ def test_ponta_a_ponta_gerar_preencher_registrar_e_excluir_na_proxima_planilha(t
     assert por_id["p-geral"]["campanha"] == "NAO_VERIFICADO"
     assert por_id["p-geral"]["pista"] == "direta"
     assert por_id["p-geral"]["prioridade_rotulo"] in ("", None)
+    # 2.3.0: cidade conferida -- Nata do contrato; Geral de CSV antigo sem a coluna 20
+    assert por_id["p-nata"]["cidade_conferida"] == "Murcia"
+    assert por_id["p-geral"]["cidade_conferida"] == "NAO_VERIFICADO"
 
     # 4) a próxima planilha exclui as duas
     resultado2 = pe.gerar_planilha(
@@ -524,8 +529,11 @@ def test_registro_antigo_ganha_colunas_novas_no_fim_sem_mexer_nas_antigas(tmp_pa
 
 
 def test_colunas_de_campanha_no_fim_do_registro():
-    assert ra.COLUNAS_CAMPANHA_REGISTRO == ("campanha", "nicho", "pista", "prioridade_rotulo", "prioridade_score")
-    assert ra.COLUNAS_REGISTRO[-5:] == ra.COLUNAS_CAMPANHA_REGISTRO
+    # "cidade_conferida" no fim desde o contrato 2.3.0 (multicidade, 06/10/2026)
+    assert ra.COLUNAS_CAMPANHA_REGISTRO == (
+        "campanha", "nicho", "pista", "prioridade_rotulo", "prioridade_score", "cidade_conferida",
+    )
+    assert ra.COLUNAS_REGISTRO[-6:] == ra.COLUNAS_CAMPANHA_REGISTRO
     assert ra.COLUNAS_REGISTRO[: ra.COLUNAS_REGISTRO.index("variante") + 1][-2:] == ("angulo", "variante")
 
 

@@ -22,24 +22,21 @@ _MENSAGENS = am.carregar_mensagens_angulo()
 _APRESENTACAO = am.carregar_apresentacao()
 _CONFIG_VALIDACAO = validador_mensagem.carregar_config()
 
-_APRES_NOVA = "Soy Douglas, hago webs aquí en Alicante."
+_APRES_NOVA = "Soy Douglas, diseñador web."  # sem cidade desde 06/10/2026 (diretor, multicidade)
 _PADRAO_EMAIL = {"tipo": "email", "regex": r"[\w.+-]+@(?:website|example)\.com"}
 
 
-def _gravar_campanha(caminho, cidade="Alicante", **over):
-    dados = {"id": "teste-campanha", "nicho": "Teste", "cidade": cidade,
+def _gravar_campanha(caminho, cidade_padrao="Alicante", **over):
+    dados = {"id": "teste-campanha", "nicho": "Teste", "cidade_padrao": cidade_padrao,
              "categorias_aceitas": ["teste"], "categorias_excluidas": []}
     dados.update(over)
     caminho.write_text(json.dumps(dados, ensure_ascii=False), encoding="utf-8")
     return caminho
 
 
-@pytest.fixture(autouse=True)
-def _cidade_fixa(tmp_path, monkeypatch):
-    """Cidade fixa (Alicante) vinda de uma campanha de TESTE em `tmp_path` --
-    `config/cidade_da_busca.json` foi aposentado na Etapa 2 (diretor,
-    04/10/2026); a cidade agora é a da campanha ativa (`campanha.py`)."""
-    monkeypatch.setenv("COMERCIAL_CAMPANHA", str(_gravar_campanha(tmp_path / "campanha_ativa.json")))
+# Cidade dos leads destes testes: desde o contrato 2.3.0 (multicidade, 06/10/2026) ela vem do
+# próprio lead (`campanha_cidade`), não mais da campanha ativa nem de config/cidade_da_busca.json.
+_CIDADE = "Alicante"
 
 
 def _regras(**over):
@@ -54,10 +51,11 @@ def _regras_com_defeito(ativo=True, padroes=None):
 
 def _lead(
     place_id="p1", nome="Clínica Dental Sol", nicho="Clínica dental", lcp_ms=None, rodadas=2,
-    email=None, telefone_na_pagina=None,
+    email=None, telefone_na_pagina=None, cidade=_CIDADE,
 ):
     return LeadQualificado({
         "place_id": place_id,
+        "campanha_cidade": {"valor": cidade, "estado": "CONFIRMADO_PRESENTE" if cidade else "NAO_VERIFICADO"},
         "identidade": {"nome": nome, "nicho": nicho, "cidade": None, "endereco": None, "google_maps_url": None},
         "contato": {
             "whatsapp_apto": True,
@@ -100,7 +98,7 @@ def test_lentidao_texto_aprovado():
     lead = _lead(lcp_ms=12400)
     mensagem, entrada = _montar("lentidao", lead)
     assert mensagem == (
-        "Hola, buenas. Soy Douglas, hago webs aquí en Alicante. Abrí la web de Clínica Dental Sol desde el móvil "
+        "Hola, buenas. Soy Douglas, diseñador web. Abrí la web de Clínica Dental Sol desde el móvil "
         "y tardó unos 12 segundos en mostrar el contenido. Mucha gente que busca desde el móvil no espera tanto "
         "y pasa al siguiente resultado de Google. Le he apuntado lo que vi y algunas ideas para mejorarlo. "
         "¿Se lo paso por aquí?"
@@ -112,7 +110,7 @@ def test_lentidao_moderada_texto_aprovado():
     lead = _lead(lcp_ms=6400)
     mensagem, entrada = _montar("lentidao_moderada", lead)
     assert mensagem == (
-        "Hola, buenas. Soy Douglas, hago webs aquí en Alicante. Abrí la web de Clínica Dental Sol desde el móvil "
+        "Hola, buenas. Soy Douglas, diseñador web. Abrí la web de Clínica Dental Sol desde el móvil "
         "y tardó unos 6 segundos en cargar. No es grave, pero en el móvil se nota y suele tener arreglo fácil. "
         "Si quiere, le paso lo que vi. ¿Se lo envío?"
     )
@@ -124,7 +122,7 @@ def test_defeito_visivel_texto_aprovado():
     regras = _regras_com_defeito()
     mensagem, entrada = _montar("defeito_visivel", lead, regras)
     assert mensagem == (
-        'Hola, buenas. Soy Douglas, hago webs aquí en Alicante. Revisando su web vi que aparece el correo '
+        'Hola, buenas. Soy Douglas, diseñador web. Revisando su web vi que aparece el correo '
         '"info@website.com", que parece un texto de la plantilla que quedó sin cambiar. Si un paciente intenta '
         'escribirles ahí, el correo no les llega. Se lo comento por si no lo sabían. Si quiere, le paso un par de '
         'detalles más que vi.'
@@ -133,7 +131,8 @@ def test_defeito_visivel_texto_aprovado():
 
 
 def _linha_csv(**over):
-    base = {"nome": "Clínica Dental Sol", "site": "", "classe_site": "sem_site", "avaliacoes": "120", "nota": "4.8"}
+    base = {"nome": "Clínica Dental Sol", "site": "", "classe_site": "sem_site", "avaliacoes": "120", "nota": "4.8",
+            "campanha_cidade": _CIDADE}
     base.update(over)
     return base
 
@@ -148,7 +147,7 @@ def test_sem_site_texto_aprovado():
     linha = _linha_csv()
     mensagem, entrada = _montar_direta(linha)
     assert mensagem == (
-        "Hola, buenas. Soy Douglas, hago webs aquí en Alicante. Vi su ficha en Google: un 4,8 con 120 reseñas, "
+        "Hola, buenas. Soy Douglas, diseñador web. Vi su ficha en Google: un 4,8 con 120 reseñas, "
         "se nota que sus pacientes están contentos. Pero quien quiere ver tratamientos o cómo funciona la primera "
         "cita antes de llamar no tiene una web a la que ir. Le puedo enseñar un ejemplo de cómo quedaría una "
         "página sencilla para Clínica Dental Sol. ¿Le interesa verlo?"
@@ -330,7 +329,7 @@ def test_carga_recusa_cta_sem_pergunta_em_modelo_sem_excecao():
     ("Velia Clínica Dental Alicante | Dentista en Alicante", "Velia Clínica Dental"),
 ])
 def test_nome_curto_seguro_limpa(nome, esperado):
-    assert am.nome_curto_seguro(nome, _REGRAS) == esperado
+    assert am.nome_curto_seguro(nome, _REGRAS, cidade=_CIDADE) == esperado
 
 
 @pytest.mark.parametrize("nome,trecho", [
@@ -347,42 +346,43 @@ def test_nome_curto_seguro_limpa(nome, esperado):
 ])
 def test_nome_curto_inseguro_pede_revisao(nome, trecho):
     with pytest.raises(am.LinhaPedeRevisaoError, match=trecho):
-        am.nome_curto_seguro(nome, _REGRAS)
+        am.nome_curto_seguro(nome, _REGRAS, cidade=_CIDADE)
 
 
-# --- cidade da campanha ativa (Etapa 2, 2.4) ------------------------------------
+# --- cidade do lead (contrato 2.3.0, multicidade) --------------------------------
 
 
-def test_trocar_a_cidade_da_campanha_muda_o_nome_curto_sem_tocar_mais_nada(tmp_path, monkeypatch):
-    """Aceite 2.4: a mesma chamada, com a cidade trocada só no arquivo de
-    campanha, corta outra cidade do fim do nome."""
-    caminho = tmp_path / "campanha_trocada.json"
-    monkeypatch.setenv("COMERCIAL_CAMPANHA", str(_gravar_campanha(caminho, cidade="Alicante")))
-    assert am.nome_curto_seguro("Lunaria Elche", _REGRAS) == "Lunaria Elche"  # controle: Elche não é a cidade
-    assert am.nome_curto_seguro("Lunaria Alicante", _REGRAS) == "Lunaria"
-    _gravar_campanha(caminho, cidade="Elche")
-    assert am.nome_curto_seguro("Lunaria Elche", _REGRAS) == "Lunaria"
-    assert am.nome_curto_seguro("Lunaria Alicante", _REGRAS) == "Lunaria Alicante"
+def test_trocar_a_cidade_do_lead_muda_o_nome_curto_sem_tocar_mais_nada():
+    """A mesma chamada, com outra cidade no lead, corta outra cidade do fim do nome."""
+    assert am.nome_curto_seguro("Lunaria Elche", _REGRAS, cidade="Alicante") == "Lunaria Elche"  # controle
+    assert am.nome_curto_seguro("Lunaria Alicante", _REGRAS, cidade="Alicante") == "Lunaria"
+    assert am.nome_curto_seguro("Lunaria Elche", _REGRAS, cidade="Elche") == "Lunaria"
+    assert am.nome_curto_seguro("Lunaria Alicante", _REGRAS, cidade="Elche") == "Lunaria Alicante"
 
 
-def test_cidade_da_campanha_no_meio_do_nome_pede_revisao_com_a_cidade_nova(tmp_path, monkeypatch):
-    monkeypatch.setenv("COMERCIAL_CAMPANHA", str(_gravar_campanha(tmp_path / "c.json", cidade="Elche")))
+def test_cidade_do_lead_no_meio_do_nome_pede_revisao():
     with pytest.raises(am.LinhaPedeRevisaoError, match="Elche"):
-        am.nome_curto_seguro("Clínica Elche Centro Dental", _REGRAS)
-    assert am.nome_curto_seguro("Clínica Alicante Centro Dental", _REGRAS) == "Clínica Alicante Centro Dental"
+        am.nome_curto_seguro("Clínica Elche Centro Dental", _REGRAS, cidade="Elche")
+    assert am.nome_curto_seguro("Clínica Alicante Centro Dental", _REGRAS, cidade="Elche") == "Clínica Alicante Centro Dental"
 
 
-def test_campanha_ausente_e_falha_alta_nunca_cidade_vazia(tmp_path, monkeypatch):
-    import campanha
-
-    monkeypatch.setenv("COMERCIAL_CAMPANHA", str(tmp_path / "nao-existe.json"))
-    with pytest.raises(campanha.CampanhaInvalidaError, match="não encontrada"):
+def test_lead_sem_cidade_pede_revisao_nunca_cidade_vazia():
+    with pytest.raises(am.LinhaPedeRevisaoError, match="campanha_cidade"):
         am.nome_curto_seguro("Lunaria Alicante", _REGRAS)
 
 
+def test_mensagem_nata_de_lead_sem_cidade_pede_revisao():
+    """Ponta da Nata: lead sem `campanha_cidade` não sai com mensagem que usa {nombre}."""
+    with pytest.raises(am.LinhaPedeRevisaoError):
+        _montar("lentidao", _lead(lcp_ms=9000, cidade=None))
+
+
+# --- validação da campanha (cópia do COMERCIAL; ver test_campanha_sincronia.py) -----
+
+
 @pytest.mark.parametrize("over,trecho", [
-    ({"cidade": ""}, "'cidade'"),
-    ({"cidade": None}, "'cidade'"),
+    ({"cidade_padrao": ""}, "'cidade_padrao'"),
+    ({"cidade_padrao": None}, "'cidade_padrao'"),
     ({"id": ""}, "'id'"),
     ({"categorias_aceitas": []}, "categorias_aceitas"),
 ])
@@ -391,7 +391,7 @@ def test_campanha_invalida_e_falha_alta(tmp_path, monkeypatch, over, trecho):
 
     monkeypatch.setenv("COMERCIAL_CAMPANHA", str(_gravar_campanha(tmp_path / "c.json", **over)))
     with pytest.raises(campanha.CampanhaInvalidaError, match=trecho):
-        am.nome_curto_seguro("Lunaria", _REGRAS)
+        campanha.carregar_campanha()
 
 
 def test_campanha_json_quebrado_e_falha_alta(tmp_path, monkeypatch):
@@ -401,7 +401,7 @@ def test_campanha_json_quebrado_e_falha_alta(tmp_path, monkeypatch):
     caminho.write_text("{ isto não é json", encoding="utf-8")
     monkeypatch.setenv("COMERCIAL_CAMPANHA", str(caminho))
     with pytest.raises(campanha.CampanhaInvalidaError, match="não é JSON"):
-        am.carregar_cidade_campanha()
+        campanha.carregar_campanha()
 
 
 def test_campanha_sem_env_resolve_o_arquivo_do_eqc(monkeypatch):
