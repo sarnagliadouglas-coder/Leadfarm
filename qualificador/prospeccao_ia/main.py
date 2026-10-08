@@ -1,6 +1,7 @@
 import csv
 import os
 import re
+import shutil
 import json
 import sys
 import time
@@ -18,6 +19,7 @@ import lead_qualification
 import output_json
 import psi_client
 import rede_multiunidade
+import reprovados as rep
 import saida_humana
 import site_classificacao
 import site_renderizado
@@ -58,6 +60,9 @@ PATH_COM_SITE = os.path.join(DATA_DIR, "leads_com_site.json")
 # Metadado da última importação (qual CSV do EXTRATOR alimentou esta rodada). Estado
 # interno -- fica no DATA_DIR do projeto, NÃO faz parte do contrato externo.
 PATH_IMPORT_META = os.path.join(DATA_DIR, "_import_meta.json")
+# Histórico permanente das reprovações (reprovados.py): só de acréscimo, nunca zerado --
+# nem pelo arquivar-pool. Dado operacional, fora do git.
+PATH_HISTORICO_REPROVADOS = os.path.join(DATA_DIR, "historico_reprovados.jsonl")
 # Traceback de erro do import (erro_import.gravar_log). Dado operacional, fora do git.
 LOG_DIR = os.path.join(DATA_DIR, "logs")
 
@@ -136,20 +141,32 @@ def _acrescentar_novos(caminho, leads, status, conhecidas_globais):
     return len(novos)
 
 
-def _acrescentar_reprovados(leads, conhecidas_globais):
-    """Igual ao _acrescentar_novos, mas extrai o motivo (anexado pelo coletor em cada lead)
-    pro nível do registro — nunca reprova silenciosamente. `rejection_detail` (categoria que
-    causou o corte, grupo de rede...) também sobe para o registro quando existe."""
+def _registro_reprovado(lead, etapa, agora):
+    """Registro de leads_reprovados.json: motivo (anexado por quem cortou) no nível do registro
+    — nunca reprova silenciosamente —, `rejection_detail` (atravessa o contrato como
+    detalhe_do_corte) e `detalhe_interno` (só histórico/consulta) quando existem, mais o
+    carimbo de data, origem e etapa (reprovados.carimbar_registro)."""
+    motivo = lead.pop("rejection_reason", "unknown")
+    registro = {"dados_empresa": lead, "status": "rejected", "rejection_reason": motivo}
+    detalhe = lead.pop("rejection_detail", None)
+    if detalhe is not None:
+        registro["rejection_detail"] = detalhe
+    interno = lead.pop("detalhe_interno", None)
+    if interno is not None:
+        registro["detalhe_interno"] = interno
+    return rep.carimbar_registro(registro, etapa, agora)
+
+
+def _acrescentar_reprovados(leads, conhecidas_globais, etapa=rep.ETAPA_IMPORT):
+    """Igual ao _acrescentar_novos, mas monta o registro de reprovação (_registro_reprovado)
+    e, depois de gravar, acrescenta uma linha por reprovação ao histórico permanente."""
     existentes = carregar_json(PATH_REPROVADOS)
     novos = [l for l in leads if chave_dedup(l) not in conhecidas_globais]
-    for lead in novos:
-        motivo = lead.pop("rejection_reason", "unknown")
-        registro = {"dados_empresa": lead, "status": "rejected", "rejection_reason": motivo}
-        detalhe = lead.pop("rejection_detail", None)
-        if detalhe is not None:
-            registro["rejection_detail"] = detalhe
-        existentes.append(registro)
+    agora = _now_iso()
+    registros = [_registro_reprovado(lead, etapa, agora) for lead in novos]
+    existentes.extend(registros)
     salvar_json(PATH_REPROVADOS, existentes)
+    rep.acrescentar_historico(PATH_HISTORICO_REPROVADOS, rep.linhas_reprovacao(registros))
     return len(novos)
 
 
@@ -169,7 +186,7 @@ def _arquivos_pool_ativo():
     return [PATH_COLETADOS, PATH_COM_SITE, PATH_QUALIFICADOS]
 
 
-def _aplicar_filtro_rede(wave1, wave2, reprovados, config_rede, conhecidas_globais):
+def _aplicar_filtro_rede(wave1, wave2, reprovados, config_rede, conhecidas_globais, chaves_fora_do_pool=frozenset()):
     """Filtro de redes / multiunidade (rede_multiunidade.py) sobre o POOL inteiro + os leads
     novos deste import. Só CALCULA e altera listas/registros em memória; devolve o que
     main.importar_csv precisa gravar. Nada é escrito aqui.
@@ -180,7 +197,10 @@ def _aplicar_filtro_rede(wave1, wave2, reprovados, config_rede, conhecidas_globa
       leads_reprovados.json (o registro inteiro é preservado, com status_anterior);
     - grupo menor que o limiar (2+): aviso `possivel_mesmo_negocio` nos ativos (novos e do
       pool); lead novo ativo sem par recebe [] (checado, nenhum par).
-    Registros já reprovados contam para o tamanho do grupo, mas mantêm o motivo original."""
+    Registros já reprovados contam para o tamanho do grupo, mas mantêm o motivo original.
+
+    `chaves_fora_do_pool` (só a reavaliação usa): registros de leads_reprovados.json com essas
+    chaves são tratados como fora do pool -- os leads devolvidos entram como novos (wave1/wave2)."""
     limiar = config_rede["limiar_rede"]
     marcas = config_rede["marcas"]
 
@@ -203,6 +223,9 @@ def _aplicar_filtro_rede(wave1, wave2, reprovados, config_rede, conhecidas_globa
 
     # 2. Fichas: pool inteiro (uma por chave) + leads novos deste import.
     pool = {caminho: carregar_json(caminho) for caminho in _arquivos_pool_ativo() + [PATH_REPROVADOS]}
+    if chaves_fora_do_pool:
+        pool[PATH_REPROVADOS] = [r for r in pool[PATH_REPROVADOS]
+                                 if chave_dedup(r.get("dados_empresa") or {}) not in chaves_fora_do_pool]
     fichas, origem, vistas = [], [], set()
     for caminho, registros in pool.items():
         for registro in registros:
@@ -224,6 +247,7 @@ def _aplicar_filtro_rede(wave1, wave2, reprovados, config_rede, conhecidas_globa
 
     # 3. Aplicação em memória.
     pool_movidos, avisos_marcados, pool_alterado = [], 0, set()
+    agora = _now_iso()
     for i, (tipo, onde, item, ativo) in enumerate(origem):
         if not ativo:
             continue
@@ -235,9 +259,10 @@ def _aplicar_filtro_rede(wave1, wave2, reprovados, config_rede, conhecidas_globa
                 reprovados.append(item)
             else:
                 _remover_identico(pool[onde], item)
-                pool_movidos.append({**item, "status": "rejected", "status_anterior": item.get("status"),
-                                     "rejection_reason": rede_multiunidade.MOTIVO,
-                                     "rejection_detail": descartes[i]})
+                pool_movidos.append(rep.carimbar_registro(
+                    {**item, "status": "rejected", "status_anterior": item.get("status"),
+                     "rejection_reason": rede_multiunidade.MOTIVO,
+                     "rejection_detail": descartes[i]}, rep.ETAPA_REDE_POOL, agora))
                 pool_alterado.add(onde)
             continue
         if i in avisos:
@@ -252,7 +277,7 @@ def _aplicar_filtro_rede(wave1, wave2, reprovados, config_rede, conhecidas_globa
     if pool_movidos:
         pool_alterado.add(PATH_REPROVADOS)
     return {"pool": pool, "pool_alterado": pool_alterado, "pool_movidos": len(pool_movidos),
-            "por_marca": len(por_marca), "avisos": avisos_marcados}
+            "registros_movidos": pool_movidos, "por_marca": len(por_marca), "avisos": avisos_marcados}
 
 
 def importar_csv(caminho_csv):
@@ -288,6 +313,12 @@ def importar_csv(caminho_csv):
         # e sobe como erro inesperado -- antes um `except Exception` a engolia e saía com 0.
         raise erro_import.CsvIlegivelError(f"O CSV '{os.path.basename(caminho_csv)}' não pôde ser lido: {e}") from e
 
+    # De que lista e de que busca veio cada lead (dado interno: output_json só lê campos
+    # nomeados de dados_empresa) -- é daqui que a Onda 1 tira o carimbo da reprovação.
+    origem = rep.carimbo_import(os.path.basename(caminho_csv), (sidecar or {}).get("termo_busca"))
+    for lead in wave1 + wave2 + reprovados:
+        lead.update(origem)
+
     total_coletor = len(wave1) + len(wave2) + len(reprovados)
     conhecidas_globais = _todas_chaves_conhecidas()
     rede = _aplicar_filtro_rede(wave1, wave2, reprovados, config_rede, conhecidas_globais)
@@ -295,6 +326,7 @@ def importar_csv(caminho_csv):
     # Gravação: primeiro o pool alterado pelo filtro de rede, depois os leads novos.
     for caminho in rede["pool_alterado"]:
         salvar_json(caminho, rede["pool"][caminho])
+    rep.acrescentar_historico(PATH_HISTORICO_REPROVADOS, rep.linhas_reprovacao(rede["registros_movidos"]))
     motivos_novos = {}
     for lead in reprovados:
         if chave_dedup(lead) not in conhecidas_globais:
@@ -348,11 +380,18 @@ def _mover_para_reprovados(leads_com_motivo):
     if not leads_com_motivo:
         return 0
     existentes = carregar_json(PATH_REPROVADOS)
-    for lead in leads_com_motivo:
-        motivo = lead.pop("rejection_reason", "unknown")
-        existentes.append({"dados_empresa": lead, "status": "rejected", "rejection_reason": motivo})
+    agora = _now_iso()
+    registros = [_registro_reprovado(lead, rep.ETAPA_ONDA1, agora) for lead in leads_com_motivo]
+    existentes.extend(registros)
     salvar_json(PATH_REPROVADOS, existentes)
+    rep.acrescentar_historico(PATH_HISTORICO_REPROVADOS, rep.linhas_reprovacao(registros))
     return len(leads_com_motivo)
+
+
+def _anotar_detalhe_onda1(leads, icp=None):
+    """`detalhe_interno` (nunca rejection_detail: este atravessa o contrato) nos cortes da Onda 1."""
+    for lead in leads:
+        lead["detalhe_interno"] = rep.detalhe_onda1(lead, lead.get("rejection_reason"), icp)
 
 
 def imprimir_qualificados_onda1(novos_qualificados):
@@ -425,6 +464,7 @@ def fase_qualify():
     leads_a_avaliar = [l["dados_empresa"] for l in a_avaliar]
     aprovados_icp, reprovados_icp = lead_qualification.filtrar_icp(leads_a_avaliar, icp)
     metricas["total_reprovados_icp"] = len(reprovados_icp)
+    _anotar_detalhe_onda1(reprovados_icp, icp)
     _mover_para_reprovados(reprovados_icp)
 
     # --- FILTRO DE CONTATABILIDADE ($0, exclusivo da Onda 1) ---
@@ -433,6 +473,7 @@ def fase_qualify():
     # que não há como contactar. Ver lead_qualification pro porquê disto não valer pra Onda 2.
     aprovados_contato, reprovados_contato = lead_qualification.filtrar_contactabilidade_onda1(aprovados_icp)
     metricas["total_reprovados_contato"] = len(reprovados_contato)
+    _anotar_detalhe_onda1(reprovados_contato)
     _mover_para_reprovados(reprovados_contato)
 
     candidatos = aprovados_contato if MAX_QUALIFICATION_CANDIDATES is None else aprovados_contato[:MAX_QUALIFICATION_CANDIDATES]
@@ -478,6 +519,7 @@ def fase_qualify():
         else:
             print(f"[Qualification] [{idx}/{len(candidatos)}] {lead.get('nome', 'Empresa')} -> desqualificado")
             lead["rejection_reason"] = "qualification_declined"
+            lead["detalhe_interno"] = rep.detalhe_onda1(lead, "qualification_declined", qualificacao=qual)
             desqualificados_nesta_rodada.append(lead)
 
     metricas["qualificados"] = len(qualificados_nesta_rodada)
@@ -1044,6 +1086,260 @@ def fase_saida():
     return s
 
 
+# --- Leads reprovados: consulta, reavaliação e arquivamento do pool (07/10/2026) --------------
+
+def _arquivos_do_pool():
+    """O que o arquivar-pool zera (e o backup copia, junto com o histórico)."""
+    return [PATH_COLETADOS, PATH_COM_SITE, PATH_QUALIFICADOS, PATH_REPROVADOS, PATH_IMPORT_META]
+
+
+def _carimbo_hora_local():
+    return datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+def _fazer_backup(prefixo, pastas=()):
+    """Backup conferido por hash do pool + histórico (+ `pastas`). Levanta rep.BackupFalhouError;
+    backup pela metade fica como ...-INCOMPLETO, nunca apagado."""
+    pasta, copiados, ausentes = rep.backup_conferido(
+        _arquivos_do_pool() + [PATH_HISTORICO_REPROVADOS], prefixo, _carimbo_hora_local(), pastas=pastas)
+    print(f"Backup feito e conferido ({len(copiados)} arquivo(s), cada cópia igual ao original): {pasta}")
+    if ausentes:
+        print(f"  (não existiam, nada a copiar: {', '.join(ausentes)})")
+    return pasta
+
+
+def fase_reprovados(desde=None, ate=None, motivo=None, campanha=None, cidade=None, categoria=None, lista=False,
+                    fuso=None):
+    """Consulta SÓ DE LEITURA ao histórico permanente das reprovações. `fuso` (tzinfo) só para
+    teste; None = fuso local do computador."""
+    todas, ilegiveis = rep.ler_historico(PATH_HISTORICO_REPROVADOS)
+    filtros = {"desde": desde, "ate": ate, "motivo": motivo, "campanha": campanha,
+               "cidade": cidade, "categoria": categoria}
+    selecionadas = rep.filtrar(todas, **filtros, fuso=fuso)
+    for linha in rep.relatorio(todas, selecionadas, filtros, ilegiveis, PATH_HISTORICO_REPROVADOS, lista, fuso):
+        print(linha)
+    return selecionadas
+
+
+def _resumo_lead(emp, vezes=1):
+    repetido = f" (aparece {vezes} vezes)" if vezes > 1 else ""
+    return (f"{emp.get('nome') or '?'} · {emp.get('nicho') or '?'} · {emp.get('campanha_cidade') or '?'} "
+            f"(campanha {emp.get('campanha_id') or '?'}){repetido}")
+
+
+def _planejar_reavaliacao():
+    """Calcula, SÓ EM MEMÓRIA, o que a reavaliação faria. Nada é gravado aqui.
+
+    Entram os registros de leads_reprovados.json cortados por categoria. Cada um é repassado
+    pela versão ATUAL da campanha do próprio lead (campanha_id). O que passa na categoria
+    segue o resto do import que não chegou a fazer: filtros comerciais, separação em ondas e
+    filtro de redes sobre o pool inteiro (mesma regra do import).
+
+    Tudo é POR LEAD (chave de dedupe): um lead com vários registros aparece uma vez, com
+    `vezes` = quantas vezes está em leads_reprovados.json; repetido nunca volta (olho humano)."""
+    reprovados_disco = carregar_json(PATH_REPROVADOS)
+    plano = {"candidatos": [], "registros_candidatos": 0, "vezes": {}, "sem_campanha": [], "continua_fora": [],
+             "ja_no_pool": [], "repetidos": [], "wave1": [], "wave2": [], "outro_filtro": [], "rede": None,
+             "registro_por_chave": {}, "conhecidas": set()}
+    candidatos = [r for r in reprovados_disco
+                  if r.get("dados_empresa") and r.get("rejection_reason") in rep.MOTIVOS_DE_CATEGORIA]
+    plano["registros_candidatos"] = len(candidatos)
+    por_chave = {}
+    for r in candidatos:
+        por_chave.setdefault(chave_dedup(r["dados_empresa"]), r)  # o primeiro registro representa o lead
+    plano["candidatos"] = list(por_chave.values())
+    if not plano["candidatos"]:
+        return plano
+    campanhas = {c["id"]: c for c in campanha_mod.carregar_campanhas_disponiveis()}
+    chaves_ativas = chaves_conhecidas(*(carregar_json(p) for p in _arquivos_pool_ativo()))
+    contagem = plano["vezes"]
+    for r in reprovados_disco:
+        if r.get("dados_empresa"):
+            chave = chave_dedup(r["dados_empresa"])
+            contagem[chave] = contagem.get(chave, 0) + 1
+
+    passam = []
+    for chave, registro in por_chave.items():
+        emp = json.loads(json.dumps(registro["dados_empresa"]))  # cópia: o disco só muda no --confirmar
+        camp = campanhas.get(emp.get("campanha_id"))
+        if camp is None:
+            plano["sem_campanha"].append(registro)
+            continue
+        corte = campanha_mod.motivo_categoria(emp.get("nicho"), camp)
+        if corte:
+            plano["continua_fora"].append((registro, corte[0]))
+        elif chave in chaves_ativas:
+            plano["ja_no_pool"].append(registro)
+        elif contagem[chave] > 1:
+            plano["repetidos"].append(registro)
+        else:
+            passam.append(emp)
+            plano["registro_por_chave"][chave] = registro
+    if not passam:
+        return plano
+
+    aprovados, outro_filtro = AgentColetor._aplicar_filtros_comerciais(passam)
+    wave1, wave2 = AgentColetor._classificar_campanha(aprovados)
+    chaves_voltam = set(plano["registro_por_chave"])
+    conhecidas = _todas_chaves_conhecidas() - chaves_voltam
+    plano["rede"] = _aplicar_filtro_rede(wave1, wave2, outro_filtro, rede_multiunidade.carregar_config(),
+                                         conhecidas, chaves_fora_do_pool=chaves_voltam)
+    plano.update(wave1=wave1, wave2=wave2, outro_filtro=outro_filtro, conhecidas=conhecidas)
+    return plano
+
+
+def _imprimir_plano_reavaliacao(plano):
+    def resumo(emp):
+        return _resumo_lead(emp, plano["vezes"].get(chave_dedup(emp), 1))
+
+    print("==================================================")
+    print(" REAVALIAÇÃO DOS REPROVADOS POR CATEGORIA")
+    print(" (cada lead pela versão atual da campanha dele)")
+    print("==================================================")
+    registros = (f" ({plano['registros_candidatos']} registros)"
+                 if plano["registros_candidatos"] != len(plano["candidatos"]) else "")
+    print(f"Reprovados por categoria no pool atual: {len(plano['candidatos'])} lead(s){registros}")
+    voltam = [(e, "Onda 1 (sem site)") for e in plano["wave1"]] + [(e, "Onda 2 (com site)") for e in plano["wave2"]]
+    print(f"\nVoltariam para a fila: {len(voltam)} lead(s)")
+    for emp, destino in voltam:
+        print(f"  - {resumo(emp)} -> {destino}")
+    print(f"\nContinuam fora, porque a categoria ainda não serve: {len(plano['continua_fora'])} lead(s)")
+    for registro, motivo in plano["continua_fora"]:
+        print(f"  - {resumo(registro['dados_empresa'])}: {rep.rotulo_motivo(motivo)}")
+    print(f"\nPassam na categoria, mas continuam fora por outro motivo: {len(plano['outro_filtro'])} lead(s)")
+    for lead in plano["outro_filtro"]:
+        print(f"  - {resumo(lead)}: {rep.rotulo_motivo(lead.get('rejection_reason'))}")
+    if plano["sem_campanha"]:
+        print(f"\nCampanha não encontrada (o lead não volta): {len(plano['sem_campanha'])} lead(s)")
+        for registro in plano["sem_campanha"]:
+            print(f"  - {resumo(registro['dados_empresa'])}")
+    if plano["ja_no_pool"]:
+        print(f"\nJá estão no pool ativo (não duplicam, ficam como estão): {len(plano['ja_no_pool'])} lead(s)")
+        for registro in plano["ja_no_pool"]:
+            print(f"  - {resumo(registro['dados_empresa'])}")
+    if plano["repetidos"]:
+        print(f"\nAparecem mais de uma vez nos reprovados (não voltam; precisam de olho humano): "
+              f"{len(plano['repetidos'])} lead(s)")
+        for registro in plano["repetidos"]:
+            print(f"  - {resumo(registro['dados_empresa'])}")
+    movidos = (plano["rede"] or {}).get("registros_movidos") or []
+    if movidos:
+        print(f"\nATENÇÃO: fichas que hoje estão ATIVAS e sairiam do pool, porque formam rede com um lead "
+              f"devolvido (mesma regra do import): {len(movidos)}")
+        for registro in movidos:
+            print(f"  - {resumo(registro['dados_empresa'])}")
+    print("==================================================")
+
+
+def fase_reavaliar(confirmar=False):
+    """Sem `confirmar`: só MOSTRA o que voltaria para a fila -- nenhum arquivo é tocado.
+    Com `confirmar`: backup conferido do pool, depois aplica e registra cada devolução no
+    histórico."""
+    try:
+        plano = _planejar_reavaliacao()
+    except (campanha_mod.CampanhaInvalidaError, rede_multiunidade.ConfigRedeInvalidaError) as e:
+        print(f"Não consegui reavaliar: {e}\nNada foi alterado.")
+        return None
+    _imprimir_plano_reavaliacao(plano)
+    rede = plano["rede"]
+    ha_mudanca = bool(plano["wave1"] or plano["wave2"] or plano["outro_filtro"])
+    if not confirmar:
+        print("Nada foi alterado (esta é só a prévia).")
+        if ha_mudanca:
+            print("Para aplicar o que está acima, rode: python main.py reavaliar --confirmar")
+        return {"confirmado": False, "plano": plano}
+    if not ha_mudanca:
+        print("Não há nada para aplicar. Nenhum arquivo foi alterado.")
+        return {"confirmado": True, "plano": plano, "devolvidos": 0}
+
+    try:
+        backup = _fazer_backup("pool-antes-de-reavaliar")
+    except rep.BackupFalhouError as e:
+        print(f"O backup falhou: {e}")
+        return None
+
+    agora = _now_iso()
+    novos_registros = [_registro_reprovado(lead, rep.ETAPA_REAVALIACAO, agora) for lead in plano["outro_filtro"]]
+    for caminho in rede["pool_alterado"] - {PATH_REPROVADOS}:
+        salvar_json(caminho, rede["pool"][caminho])
+    salvar_json(PATH_REPROVADOS, rede["pool"][PATH_REPROVADOS] + novos_registros)
+    n1 = _acrescentar_novos(PATH_COLETADOS, plano["wave1"], "eligible", plano["conhecidas"])
+    n2 = _acrescentar_novos(PATH_COM_SITE, plano["wave2"], "queued_future", plano["conhecidas"])
+
+    linhas = rep.linhas_reprovacao(rede["registros_movidos"]) + rep.linhas_reprovacao(novos_registros)
+    for lista, destino in ((plano["wave1"], "onda1"), (plano["wave2"], "onda2")):
+        for emp in lista:
+            anterior = plano["registro_por_chave"][chave_dedup(emp)]
+            linhas.append(rep.linha_devolucao(anterior, emp, destino, agora))
+    rep.acrescentar_historico(PATH_HISTORICO_REPROVADOS, linhas)
+
+    print(f"Feito: {n1 + n2} lead(s) devolvido(s) à fila ({n1} na Onda 1, {n2} na Onda 2); "
+          f"{len(novos_registros)} continuam fora por outro motivo; "
+          f"{len(rede['registros_movidos'])} ficha(s) ativa(s) saíram por rede.")
+    print("Cada devolução ficou anotada no histórico de reprovados.")
+    return {"confirmado": True, "plano": plano, "devolvidos": n1 + n2, "backup": str(backup)}
+
+
+def fase_arquivar_pool(confirmar=False):
+    """Único jeito de arquivar o pool. Sem `confirmar`: só mostra. Com `confirmar`: copia os
+    quatro JSONs, o _import_meta.json, o histórico e a pasta data/capturas_site/ para o backup,
+    confere cada cópia por hash e SÓ ENTÃO zera os quatro JSONs e o _import_meta.json e remove
+    data/capturas_site/. O histórico nunca é movido, zerado nem alterado; data/logs/ fica onde
+    está."""
+    print("==================================================")
+    print(" ARQUIVAR O POOL DO QUALIFICADOR")
+    print("==================================================")
+    for caminho in _arquivos_do_pool():
+        nome = os.path.basename(caminho)
+        if os.path.exists(caminho):
+            dados = carregar_json(caminho)
+            qtd = f"{len(dados)} registro(s)" if isinstance(dados, list) else "metadado da última importação"
+            print(f"  {nome}: {qtd} -> vai para o backup e depois é zerado")
+        else:
+            print(f"  {nome}: não existe (nada a fazer)")
+    capturas = _pasta_capturas()
+    if os.path.isdir(capturas):
+        n_capturas = sum(1 for p in Path(capturas).rglob("*") if p.is_file())
+        print(f"  capturas_site/: {n_capturas} arquivo(s) de captura de site -> vão para o backup e depois "
+              f"saem do data/")
+    else:
+        print("  capturas_site/: não existe (nada a fazer)")
+    hist_existe = os.path.exists(PATH_HISTORICO_REPROVADOS)
+    print(f"  {os.path.basename(PATH_HISTORICO_REPROVADOS)}: "
+          + ("é copiado para o backup e CONTINUA no lugar, sem nenhuma mudança" if hist_existe
+             else "ainda não existe (nada a copiar)"))
+    print("  logs/: fica onde está (não entra no arquivamento)")
+    print(f"Pasta do backup: {rep.dir_backups()}{os.sep}pool-arquivado-<data e hora>")
+    if not confirmar:
+        print("Nada foi alterado (esta é só a prévia). Para arquivar de verdade, rode: "
+              "python main.py arquivar-pool --confirmar")
+        return {"confirmado": False}
+
+    hash_hist_antes = rep.sha256(PATH_HISTORICO_REPROVADOS) if hist_existe else None
+    try:
+        backup = _fazer_backup("pool-arquivado", pastas=[capturas])
+    except rep.BackupFalhouError as e:
+        print(f"O backup falhou: {e}")
+        print("O pool NÃO foi zerado.")
+        return None
+
+    for caminho in [PATH_COLETADOS, PATH_COM_SITE, PATH_QUALIFICADOS, PATH_REPROVADOS]:
+        salvar_json(caminho, [])
+    salvar_json(PATH_IMPORT_META, {})
+    havia_capturas = os.path.isdir(capturas)
+    if havia_capturas:
+        shutil.rmtree(capturas)  # só depois de cada captura copiada e conferida por hash
+
+    hash_hist_depois = rep.sha256(PATH_HISTORICO_REPROVADOS) if os.path.exists(PATH_HISTORICO_REPROVADOS) else None
+    if hash_hist_depois != hash_hist_antes:
+        print("ATENÇÃO: o histórico de reprovados mudou durante o arquivamento -- confira o backup.")
+    print("Pool arquivado: os quatro arquivos de leads e o _import_meta.json foram zerados"
+          + (", e as capturas de site saíram do data/ (estão no backup)." if havia_capturas else "."))
+    print("O histórico de reprovados ficou intacto.")
+    print(f"Backup: {backup}")
+    return {"confirmado": True, "backup": str(backup), "historico_intacto": hash_hist_depois == hash_hist_antes}
+
+
 def fase_all(caminho_csv=None):
     """Comando único: importa (se um CSV for passado) e roda 1 lote de cada esteira —
     Onda 1 (fase_qualify) e Onda 2 (fase_wave2). As duas ondas são 100% $0 -- não esvazia a
@@ -1102,9 +1398,30 @@ def run():
     parser = argparse.ArgumentParser(
         description="Sistema de prospecção: importa leads de um CSV do Google Maps e os prepara (determinístico, $0) pro Sistema 2.",
     )
-    parser.add_argument("command", nargs="?", choices=["gbp", "qualify", "wave2", "psi", "render", "saida", "all"], help="'gbp' diagnóstico de ficha, 'qualify' Onda 1, 'wave2' Onda 2, 'psi' PageSpeed (opcional), 'render' site com JavaScript (opcional, desligado por padrão: RENDER_ENABLED), 'saida' (re)monta leads_saida.json, 'all' roda tudo (importando primeiro se --csv for passado).")
+    parser.add_argument("command", nargs="?", choices=["gbp", "qualify", "wave2", "psi", "render", "saida", "all",
+                                                       "reprovados", "reavaliar", "arquivar-pool"],
+                        help="'gbp' diagnóstico de ficha, 'qualify' Onda 1, 'wave2' Onda 2, 'psi' PageSpeed (opcional), 'render' site com JavaScript (opcional, desligado por padrão: RENDER_ENABLED), 'saida' (re)monta leads_saida.json, 'all' roda tudo (importando primeiro se --csv for passado), 'reprovados' consulta o histórico de reprovados (só leitura), 'reavaliar' repassa os reprovados por categoria pela campanha atual (só mostra; aplica com --confirmar), 'arquivar-pool' arquiva o pool com backup (só mostra; aplica com --confirmar).")
     parser.add_argument("--csv", dest="csv_path", metavar="ARQUIVO", help="Importa leads a partir deste CSV (custo $0). Combinado com 'all', importa e já processa em seguida.")
+    parser.add_argument("--desde", metavar="AAAA-MM-DD", help="reprovados: só a partir desta data.")
+    parser.add_argument("--ate", metavar="AAAA-MM-DD", help="reprovados: só até esta data.")
+    parser.add_argument("--motivo", help="reprovados: só este motivo (código, ex.: icp_categoria_fora_do_perfil).")
+    parser.add_argument("--campanha", help="reprovados: campanha contendo este texto.")
+    parser.add_argument("--cidade", help="reprovados: cidade da busca contendo este texto.")
+    parser.add_argument("--categoria", help="reprovados: categoria do Google contendo este texto.")
+    parser.add_argument("--lista", action="store_true", help="reprovados: mostra também cada lead.")
+    parser.add_argument("--confirmar", action="store_true", help="reavaliar / arquivar-pool: aplica de verdade (sem isto, só mostra).")
     args = parser.parse_args()
+    if args.confirmar and args.command not in ("reavaliar", "arquivar-pool"):
+        parser.error("--confirmar só vale para 'reavaliar' e 'arquivar-pool'.")
+    filtros_usados = any(getattr(args, n) for n in ("desde", "ate", "motivo", "campanha", "cidade", "categoria", "lista"))
+    if filtros_usados and args.command != "reprovados":
+        parser.error("--desde, --ate, --motivo, --campanha, --cidade, --categoria e --lista só valem para 'reprovados'.")
+    for nome in ("desde", "ate"):
+        if getattr(args, nome):
+            try:
+                setattr(args, nome, rep.parse_data(getattr(args, nome)))
+            except ValueError as e:
+                parser.error(str(e))
 
     # Carrega prospeccao_ia/.env (se existir) sem sobrescrever o ambiente real. É o ponto
     # que faz PSI_ENABLED/PSI_API_KEY no .env terem efeito -- o resto do código lê os.environ
@@ -1151,6 +1468,15 @@ def _despachar(args, parser):
         fase_render()
     elif args.command == "saida":
         fase_saida()
+    elif args.command == "reprovados":
+        fase_reprovados(desde=getattr(args, "desde", None), ate=getattr(args, "ate", None),
+                        motivo=getattr(args, "motivo", None), campanha=getattr(args, "campanha", None),
+                        cidade=getattr(args, "cidade", None), categoria=getattr(args, "categoria", None),
+                        lista=getattr(args, "lista", False))
+    elif args.command == "reavaliar":
+        fase_reavaliar(confirmar=getattr(args, "confirmar", False))
+    elif args.command == "arquivar-pool":
+        fase_arquivar_pool(confirmar=getattr(args, "confirmar", False))
     else:
         parser.print_help()
 

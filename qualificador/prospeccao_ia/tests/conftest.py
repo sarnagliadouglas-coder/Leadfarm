@@ -9,6 +9,7 @@ import pytest
 
 import contrato
 import main as main_mod
+import reprovados as reprovados_mod
 import saida_humana
 import _guardiao_producao as guardiao
 
@@ -36,11 +37,18 @@ def _pastas_producao():
     inteira, qualificador/prospeccao_ia/data/, EQC/contracts/."""
     raiz_modulo = Path(__file__).resolve().parent.parent  # tests -> prospeccao_ia
     eqc_root = contrato.eqc_root()
-    return [
+    pastas = [
         ("EQC/pipeline", eqc_root / "pipeline"),
         ("qualificador/prospeccao_ia/data", raiz_modulo / "data"),
         ("EQC/contracts", eqc_root / "contracts"),
+        # Leads reprovados (07/10/2026): backups do arquivar-pool / reavaliar --confirmar. SEMPRE
+        # a pasta real (dir_backups_padrao ignora QUALIFICADOR_BACKUP_DIR do shell, 08/10/2026);
+        # se o shell apontar o env para outra pasta, ela é vigiada também.
+        ("_backups/leadfarm", reprovados_mod.dir_backups_padrao()),
     ]
+    if reprovados_mod.dir_backups() != reprovados_mod.dir_backups_padrao():
+        pastas.append(("QUALIFICADOR_BACKUP_DIR do shell", reprovados_mod.dir_backups()))
+    return pastas
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -89,6 +97,9 @@ def _isolar_persistencia_de_dados(tmp_path, monkeypatch, _campanha_teste_path):
     monkeypatch.setattr(main_mod, "PATH_REPROVADOS", str(tmp_path / "leads_reprovados.json"))
     monkeypatch.setattr(main_mod, "PATH_COM_SITE", str(tmp_path / "leads_com_site.json"))
     monkeypatch.setattr(main_mod, "PATH_IMPORT_META", str(tmp_path / "_import_meta.json"))
+    monkeypatch.setattr(main_mod, "PATH_HISTORICO_REPROVADOS", str(tmp_path / "historico_reprovados.jsonl"))
+    # Backups do arquivar-pool / reavaliar --confirmar: nunca na pasta real de backups.
+    monkeypatch.setenv(reprovados_mod.ENV_BACKUP_DIR, str(tmp_path / "_backups"))
     # A saída não tem mais path fixo -- vai para contrato.output_dir() (env). Isola aqui.
     monkeypatch.setenv("QUALIFICADOR_OUTPUT_DIR", str(tmp_path / "_saida"))
     # Idem pra saída humana (D6b): sem isto, fase_saida() grava CSVs de ensaio na pasta
