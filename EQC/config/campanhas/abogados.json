@@ -2,7 +2,7 @@
     "id": "abogados-2026-10",
     "nicho": "Abogados",
     "cidade_padrao": "Alicante",
-    "categorias_aceitas": ["abogad", "servicios legales", "bufete", "gestor", "asistencia jurídica"],
+    "categorias_aceitas": ["abogad", "servicios legales", "bufete", "asistencia jurídica"],
     "categorias_excluidas": [],
     "termos_de_busca": ["abogad"]
 }

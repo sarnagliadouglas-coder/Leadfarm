@@ -44,7 +44,7 @@ def test_nada_pendente_quando_registro_bate_com_a_planilha(tmp_path):
     planilha = _planilha(tmp_path / "p.xlsx", [_lead("p1"), _lead("p2")])
     registro = _registrar(tmp_path, planilha)
     r = pr.pendencias(planilha, registro)
-    assert r == {"nao_registrados": [], "divergentes": []}
+    assert r == {"nao_registrados": [], "eventos_nao_registrados": [], "divergentes": []}
     assert pr.main([str(planilha), "--registro", str(registro)]) == 0
 
 
@@ -59,22 +59,41 @@ def test_envio_sem_registro_e_acusado(tmp_path):
 
 def test_resultado_preenchido_depois_do_registro_e_acusado(tmp_path):
     """O caso real que motivou o comando: o diretor preenche Resultado na
-    planilha depois que o envio já foi registrado."""
+    planilha depois que o envio já foi registrado. Desde o funil por eventos
+    (diretor, 08/10/2026) é uma mudança a registrar, não uma divergência --
+    e depois de registrada não é mais acusada."""
     planilha = _planilha(tmp_path / "p.xlsx", [_lead("p1"), _lead("p2")])
     registro = _registrar(tmp_path, planilha)
     depois = _planilha(tmp_path / "p_depois.xlsx", [_lead("p1", Resultado="resposta positiva"), _lead("p2")])
     r = pr.pendencias(depois, registro)
     assert r["nao_registrados"] == []
-    assert r["divergentes"] == [{
+    assert r["divergentes"] == []
+    assert r["eventos_nao_registrados"] == [{
         "place_id": "p1", "nome": "Clínica Ficticia p1", "coluna": "Resultado",
         "no_registro": "", "na_planilha": "resposta positiva",
     }]
+    assert pr.main([str(depois), "--registro", str(registro)]) == 1
+    _registrar(tmp_path, depois)
+    assert pr.pendencias(depois, registro) == {"nao_registrados": [], "eventos_nao_registrados": [], "divergentes": []}
+    assert pr.main([str(depois), "--registro", str(registro)]) == 0
+
+
+def test_resultado_apagado_e_outras_colunas_continuam_divergencia(tmp_path):
+    """Controle negativo: só Resultado NOVO preenchido vira evento. Resultado
+    apagado na planilha e Etapa diferente seguem para o diretor decidir."""
+    planilha = _planilha(tmp_path / "p.xlsx", [_lead("p1", Resultado="resposta positiva")])
+    registro = _registrar(tmp_path, planilha)
+    depois = _planilha(tmp_path / "p_depois.xlsx", [_lead("p1", Resultado=None, Etapa="follow-up 1")])
+    r = pr.pendencias(depois, registro)
+    assert r["eventos_nao_registrados"] == []
+    assert {d["coluna"] for d in r["divergentes"]} == {"Resultado", "Etapa"}
+    assert pr.main([str(depois), "--registro", str(registro)]) == 1
 
 
 def test_linha_sem_envio_nem_decisao_nao_e_pendencia(tmp_path):
     planilha = _planilha(tmp_path / "p.xlsx", [_lead("p1", **{"Data 1º contato": None, "Etapa": None})])
     r = pr.pendencias(planilha, tmp_path / "registro_inexistente.xlsx")
-    assert r == {"nao_registrados": [], "divergentes": []}
+    assert r == {"nao_registrados": [], "eventos_nao_registrados": [], "divergentes": []}
 
 
 def test_nunca_escreve_nem_na_planilha_nem_no_registro(tmp_path):

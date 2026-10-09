@@ -1,7 +1,10 @@
 """Testes dos novos templates e ângulos (decisão do diretor, 01/10/2026):
 `lentidao` e `sem_site` com texto novo, `lentidao_moderada`, `defeito_visivel`
 (desligado até aprovar os padrões), `{nombre}`, setor de saúde e as exceções
-POR MODELO do validador.
+POR MODELO do validador. Bloco de copy, Fase 1 (diretor, 08/10/2026): textos
+reescritos, `sem_site` por nicho da campanha e sem exigir saúde,
+`lentidao_moderada` desligada -- os casos que fixavam os textos de 01/10
+foram trocados pelos textos novos, cada um com o seu controle negativo.
 
 Usa a copy real de `config/` (os textos aprovados são o que se prova) e
 leads sintéticos. Cada regra tem um caso que passa e um controle negativo
@@ -22,7 +25,7 @@ _MENSAGENS = am.carregar_mensagens_angulo()
 _APRESENTACAO = am.carregar_apresentacao()
 _CONFIG_VALIDACAO = validador_mensagem.carregar_config()
 
-_APRES_NOVA = "Soy Douglas, diseñador web."  # sem cidade desde 06/10/2026 (diretor, multicidade)
+_APRES_NOVA = "Soy Douglas, diseño webs."  # sem cidade desde 06/10/2026; "diseño webs" desde 08/10/2026
 _PADRAO_EMAIL = {"tipo": "email", "regex": r"[\w.+-]+@(?:website|example)\.com"}
 
 
@@ -95,13 +98,16 @@ def _validar(mensagem, angulo, entrada, nome):
 
 
 def test_lentidao_texto_aprovado():
+    """Bloco de copy, Fase 1 (diretor, 08/10/2026): a medição é a de
+    laboratório do PSI, no modo móvil, o fecho é a captura e o negócio é
+    "su web" -- sem o nome."""
     lead = _lead(lcp_ms=12400)
     mensagem, entrada = _montar("lentidao", lead)
     assert mensagem == (
-        "Hola, buenas. Soy Douglas, diseñador web. Abrí la web de Clínica Dental Sol desde el móvil "
-        "y tardó unos 12 segundos en mostrar el contenido. Mucha gente que busca desde el móvil no espera tanto "
-        "y pasa al siguiente resultado de Google. Le he apuntado lo que vi y algunas ideas para mejorarlo. "
-        "¿Se lo paso por aquí?"
+        "Hola, buenas. Soy Douglas, diseño webs. He probado su web con el test de "
+        "velocidad de Google para móvil y tarda unos 12 segundos en cargar. Quien busca "
+        "desde el móvil y tiene que esperar tanto suele volver atrás y llamar al siguiente de la lista. "
+        "¿Le paso una captura del resultado?"
     )
     assert _validar(mensagem, "lentidao", entrada, lead["identidade"]["nome"]).valido
 
@@ -110,7 +116,7 @@ def test_lentidao_moderada_texto_aprovado():
     lead = _lead(lcp_ms=6400)
     mensagem, entrada = _montar("lentidao_moderada", lead)
     assert mensagem == (
-        "Hola, buenas. Soy Douglas, diseñador web. Abrí la web de Clínica Dental Sol desde el móvil "
+        "Hola, buenas. Soy Douglas, diseño webs. Abrí su web desde el móvil "
         "y tardó unos 6 segundos en cargar. No es grave, pero en el móvil se nota y suele tener arreglo fácil. "
         "Si quiere, le paso lo que vi. ¿Se lo envío?"
     )
@@ -122,17 +128,16 @@ def test_defeito_visivel_texto_aprovado():
     regras = _regras_com_defeito()
     mensagem, entrada = _montar("defeito_visivel", lead, regras)
     assert mensagem == (
-        'Hola, buenas. Soy Douglas, diseñador web. Revisando su web vi que aparece el correo '
-        '"info@website.com", que parece un texto de la plantilla que quedó sin cambiar. Si un paciente intenta '
-        'escribirles ahí, el correo no les llega. Se lo comento por si no lo sabían. Si quiere, le paso un par de '
-        'detalles más que vi.'
+        'Hola, buenas. Soy Douglas, diseño webs. En su web aparece el correo "info@website.com", que parece '
+        'de la plantilla y se ha quedado sin cambiar. Es posible que lo que le escriban ahí no le esté llegando. '
+        '¿Le paso una captura de dónde aparece?'
     )
     assert _validar(mensagem, "defeito_visivel", entrada, lead["identidade"]["nome"]).valido
 
 
 def _linha_csv(**over):
     base = {"nome": "Clínica Dental Sol", "site": "", "classe_site": "sem_site", "avaliacoes": "120", "nota": "4.8",
-            "campanha_cidade": _CIDADE}
+            "campanha_cidade": _CIDADE, "campanha_nicho": "Psicólogos"}
     base.update(over)
     return base
 
@@ -143,16 +148,45 @@ def _montar_direta(linha, regras=None):
     )
 
 
-def test_sem_site_texto_aprovado():
-    linha = _linha_csv()
+_SEM_SITE_APROVADO = {
+    # bloco de copy, Fase 1 (diretor, 08/10/2026): um texto por nicho da campanha
+    "Psicólogos": (
+        "Psicología Ficticio Sur",
+        "Antes de pedir una primera sesión, mucha gente quiere saber cómo es la terapia y desde qué orientación "
+        "trabaja, y eso en la ficha no cabe. ¿Le preparo un ejemplo de cómo quedaría una página sencilla para su "
+        "consulta?",
+    ),
+    "Abogados": (
+        "Bufete Ficticio Alameda",
+        "Quien tiene un problema legal suele buscar primero si el despacho lleva asuntos como el que tiene, y eso "
+        "en la ficha no se ve. ¿Le preparo un ejemplo de cómo quedaría una página sencilla con sus especialidades?",
+    ),
+    "Arquitectos": (
+        "Estudio Ficticio Norte",
+        "Antes de llamar a un estudio, mucha gente quiere ver obra realizada, y en la ficha solo caben unas fotos "
+        "sueltas. ¿Le preparo un ejemplo de cómo quedaría una página limpia con sus proyectos?",
+    ),
+}
+
+
+@pytest.mark.parametrize("nicho", sorted(_SEM_SITE_APROVADO))
+def test_sem_site_texto_aprovado_por_nicho(nicho):
+    nome, resto = _SEM_SITE_APROVADO[nicho]
+    linha = _linha_csv(nome=nome, campanha_nicho=nicho)
     mensagem, entrada = _montar_direta(linha)
+    # sem o nome do negócio desde a segunda rodada (08/10/2026): "su ficha de Google"
     assert mensagem == (
-        "Hola, buenas. Soy Douglas, diseñador web. Vi su ficha en Google: un 4,8 con 120 reseñas, "
-        "se nota que sus pacientes están contentos. Pero quien quiere ver tratamientos o cómo funciona la primera "
-        "cita antes de llamar no tiene una web a la que ir. Le puedo enseñar un ejemplo de cómo quedaría una "
-        "página sencilla para Clínica Dental Sol. ¿Le interesa verlo?"
+        f"Hola, buenas. Soy Douglas, diseño webs. He visto su ficha de Google: un 4,8 con 120 "
+        f"reseñas, pero sin web propia. {resto}"
     )
+    assert nome not in mensagem
     assert _validar(mensagem, "sem_site", entrada, linha["nome"]).valido
+    sem, entrada_sem = _montar_direta(_linha_csv(nome=nome, campanha_nicho=nicho, nota="", avaliacoes=""))
+    assert sem == (
+        f"Hola, buenas. Soy Douglas, diseño webs. He visto su ficha de Google y veo que no tiene web propia. "
+        f"{resto}"
+    )
+    assert _validar(sem, "sem_site", entrada_sem, nome).valido
 
 
 # --- ângulo: faixas de LCP ------------------------------------------------------
@@ -160,13 +194,26 @@ def test_sem_site_texto_aprovado():
 
 @pytest.mark.parametrize("lcp,esperado", [
     (4999, am.SEM_ANGULO),
-    (5000, "lentidao_moderada"),
-    (9999, "lentidao_moderada"),
+    (5000, am.SEM_ANGULO),  # lentidao_moderada desligada (diretor, 08/10/2026)
+    (9999, am.SEM_ANGULO),
     (10000, "lentidao"),
     (24000, "lentidao"),
 ])
 def test_faixas_de_lcp(lcp, esperado):
     assert _escolher(_lead(lcp_ms=lcp)) == esperado
+
+
+def test_lentidao_moderada_vem_desligada_na_config_real():
+    assert _REGRAS["lentidao_moderada"]["ativo"] is False
+
+
+@pytest.mark.parametrize("lcp,esperado", [
+    (4999, am.SEM_ANGULO), (5000, "lentidao_moderada"), (9999, "lentidao_moderada"), (10000, "lentidao"),
+])
+def test_faixas_de_lcp_com_a_moderada_religada(lcp, esperado):
+    """Controle: religar é só a config (`ativo`), a faixa de 5 a 9,9 s volta."""
+    regras = _regras(lentidao_moderada={**_REGRAS["lentidao_moderada"], "ativo": True})
+    assert _escolher(_lead(lcp_ms=lcp), regras) == esperado
 
 
 def test_lentidao_moderada_sem_medicao_consistente_nao_sai():
@@ -175,13 +222,16 @@ def test_lentidao_moderada_sem_medicao_consistente_nao_sai():
     assert _escolher(_lead(lcp_ms=7000, rodadas=1)) == am.SEM_ANGULO
 
 
-def test_lentidao_com_1_rodada_continua_no_texto_sem_numero_antigo():
-    """A regra das rodadas não mudou: sem 2 rodadas o ângulo é `lentidao`,
-    mas o texto é o `lentidao_sem_numero` (não foi trocado nesta rodada)."""
+def test_lentidao_com_1_rodada_fica_sem_angulo():
+    """Diretor, 08/10/2026: a lentidão sem número está desligada
+    (`lentidao.sem_numero_ativo`) -- lead com uma medição só fica sem ângulo.
+    Controle: religada, volta ao texto sem número, que continua guardado."""
     lead = _lead(lcp_ms=14000, rodadas=1)
-    assert _escolher(lead) == "lentidao"
-    mensagem, entrada = _montar("lentidao", lead)
-    assert "segundos" not in mensagem and _APRES_NOVA in mensagem  # apresentação unificada (03/10/2026)
+    assert _escolher(lead) == am.SEM_ANGULO
+    regras = _regras(lentidao={**_REGRAS["lentidao"], "sem_numero_ativo": True})
+    assert _escolher(lead, regras) == "lentidao"
+    mensagem, entrada = _montar("lentidao", lead, regras)
+    assert "segundos" not in mensagem and _APRES_NOVA in mensagem
     assert entrada == {}
 
 
@@ -254,26 +304,36 @@ def test_defeito_visivel_padrao_que_nao_e_email_nao_aciona():
 
 
 def test_validador_sem_excecoes_continua_recusando_nome_dos_e_falta_de_pergunta():
-    """Controle negativo central: o mesmo texto aprovado, sem as exceções,
-    é recusado pelas três checagens -- elas não foram removidas."""
-    mensagem, entrada = _montar("defeito_visivel", _lead(email="info@website.com"), _regras_com_defeito())
-    texto = json.dumps(
-        {"estrategia": "x", "canal_sugerido": "whatsapp", "mensagem_1": str(mensagem), "fato_usado": "x"},
+    """Controle negativo central: sem as exceções, o validador recusa -- elas
+    não foram removidas. Desde 08/10/2026 nenhum modelo real dispensa a
+    pergunta final (o `defeito_visivel` passou a terminar em "?"), então a
+    dispensa é provada com um texto sintético, nas duas pontas."""
+    sem_pergunta = json.dumps(
+        {"estrategia": "x", "canal_sugerido": "whatsapp", "mensagem_1": "Hola, buenas. Se lo comento.", "fato_usado": "x"},
         ensure_ascii=False,
     )
-    sem_excecao = validador_mensagem.validar_mensagem(texto, entrada, config=_CONFIG_VALIDACAO)
+    sem_excecao = validador_mensagem.validar_mensagem(sem_pergunta, {}, config=_CONFIG_VALIDACAO)
     assert any("não termina com '?'" in m for m in sem_excecao.motivos)
+    com_excecao = validador_mensagem.validar_mensagem(
+        sem_pergunta, {}, config=_CONFIG_VALIDACAO, excecoes={"sem_pergunta_final": True},
+    )
+    assert com_excecao.valido, com_excecao.motivos
 
-    lead = _lead(lcp_ms=12400)
-    mensagem, entrada = _montar("lentidao", lead)
-    texto = json.dumps(
-        {"estrategia": "x", "canal_sugerido": "whatsapp", "mensagem_1": str(mensagem), "fato_usado": "x"},
+    # desde a segunda rodada (08/10/2026) nenhum modelo real cita o nome: a
+    # dispensa `nome_negocio` também é provada com texto sintético, nas duas pontas
+    com_nome = json.dumps(
+        {"estrategia": "x", "canal_sugerido": "whatsapp", "fato_usado": "x",
+         "mensagem_1": "Hola, buenas. He visto la web de Clínica Dental Sol. ¿Le paso una captura?"},
         ensure_ascii=False,
     )
     sem_excecao = validador_mensagem.validar_mensagem(
-        texto, entrada, config=_CONFIG_VALIDACAO, nome_negocio=lead["identidade"]["nome"],
+        com_nome, {}, config=_CONFIG_VALIDACAO, nome_negocio="Clínica Dental Sol",
     )
     assert any("nome do negócio" in m for m in sem_excecao.motivos)
+    com_excecao = validador_mensagem.validar_mensagem(
+        com_nome, {}, config=_CONFIG_VALIDACAO, nome_negocio="Clínica Dental Sol", excecoes={"nome_negocio": True},
+    )
+    assert com_excecao.valido, com_excecao.motivos
 
 
 def test_excecao_numeros_por_extenso_nao_libera_outros_numeros():
@@ -296,8 +356,13 @@ def test_modelo_sem_excecao_nao_herda_a_dos_novos():
 
 
 def test_excecoes_so_dos_modelos_novos_na_config_real():
+    """Bloco de copy, Fase 1 (08/10/2026, segunda rodada): só os modelos com
+    consequência pelo comportamento de quem busca dispensam os marcadores de
+    implicação. Nenhum dispensa o nome do negócio nem a pergunta final."""
     com_excecao = {k for k, v in _MENSAGENS.items() if isinstance(v, dict) and v.get("excecoes_validacao")}
-    assert com_excecao == {"lentidao", "lentidao_moderada", "defeito_visivel", "sem_site"}
+    assert com_excecao == {"lentidao", "lentidao_sem_numero", "lentidao_moderada", *am.MODELOS_SEM_SITE}
+    for chave in com_excecao:
+        assert _MENSAGENS[chave]["excecoes_validacao"] == {"consequencia_sem_marcador": True}, chave
 
 
 def test_carga_recusa_consequencia_que_afirma_resultado_mesmo_com_excecao():
@@ -371,10 +436,13 @@ def test_lead_sem_cidade_pede_revisao_nunca_cidade_vazia():
         am.nome_curto_seguro("Lunaria Alicante", _REGRAS)
 
 
-def test_mensagem_nata_de_lead_sem_cidade_pede_revisao():
-    """Ponta da Nata: lead sem `campanha_cidade` não sai com mensagem que usa {nombre}."""
-    with pytest.raises(am.LinhaPedeRevisaoError):
-        _montar("lentidao", _lead(lcp_ms=9000, cidade=None))
+def test_mensagem_nata_de_lead_sem_cidade_sai_sem_nome():
+    """Segunda rodada (diretor, 08/10/2026): nenhum modelo usa mais {nombre},
+    então lead sem `campanha_cidade` recebe a mensagem (antes: REVISAR NOME).
+    O mecanismo continua -- ver `test_nome_curto_ainda_pede_revisao_para_modelo_que_use_nombre`
+    em test_bloco_copy_fase1.py."""
+    mensagem, _ = _montar("lentidao", _lead(lcp_ms=12400, cidade=None))
+    assert mensagem.startswith(f"Hola, buenas. {_APRES_NOVA} He probado su web")
 
 
 # --- validação da campanha (cópia do COMERCIAL; ver test_campanha_sincronia.py) -----
@@ -423,18 +491,22 @@ def test_cidade_da_busca_json_aposentado():
     assert not hasattr(am, "CAMINHO_CIDADE_PADRAO")
 
 
-def test_nome_inseguro_nao_gera_mensagem_pronta():
+def test_nome_que_nao_limpa_nao_impede_mais_a_mensagem():
+    """Segunda rodada (08/10/2026): o nome não entra na mensagem, então um nome
+    que não limpa com segurança (emoji) não segura mais o lead em REVISAR NOME."""
     lead = _lead(lcp_ms=12400, nome="Clínica Dental Ficticia 🦷 Su Sonrisa")
-    with pytest.raises(am.LinhaPedeRevisaoError, match="REVISAR NOME"):
-        _montar("lentidao", lead)
-
-
-def test_nome_com_digitos_entra_na_entrada_derivada():
-    """O validador confere número contra a entrada: um dígito do nome
-    ("24") tem que estar nela, ou a mensagem seria recusada."""
-    lead = _lead(lcp_ms=12400, nome="Clínica Dental 24")
     mensagem, entrada = _montar("lentidao", lead)
-    assert "Clínica Dental 24" in mensagem
+    assert "Ficticia" not in mensagem and "🦷" not in mensagem
+    assert _validar(mensagem, "lentidao", entrada, lead["identidade"]["nome"]).valido
+
+
+def test_nome_com_digitos_nao_entra_na_mensagem():
+    """Antes o dígito do nome ("24") precisava ir para a entrada derivada;
+    sem o nome na mensagem, só os segundos medidos são número."""
+    lead = _lead(lcp_ms=12400, nome="Clínica Ficticio 24")
+    mensagem, entrada = _montar("lentidao", lead)
+    assert "Clínica Ficticio 24" not in mensagem
+    assert entrada == {"segundos": 12, "nombre": "Clínica Ficticio 24"}
     assert _validar(mensagem, "lentidao", entrada, lead["identidade"]["nome"]).valido
 
 
@@ -463,24 +535,41 @@ def test_setor_sem_config_levanta_em_vez_de_assumir_saude():
         am.setor_e_saude("Dentista", "X", regras)
 
 
-def test_sem_site_fora_da_saude_pede_revisao():
-    with pytest.raises(am.LinhaPedeRevisaoError, match="REVISAR SETOR"):
-        _montar_direta(_linha_csv(nome="Constructora Sol"))
+def test_sem_site_nao_exige_mais_setor_de_saude():
+    """Bloco de copy, Fase 1 (diretor, 08/10/2026): o texto é do nicho da
+    campanha, não fala de paciente fora da saúde -- um escritório de nome
+    "não saúde" sai com mensagem. Antes saía REVISAR SETOR."""
+    for chave in am.MODELOS_SEM_SITE:
+        assert "exige_setor_saude" not in _MENSAGENS[chave], chave
+    mensagem, _ = _montar_direta(_linha_csv(nome="Bufete Ficticio Alameda", campanha_nicho="Abogados"))
+    assert "sus especialidades" in mensagem and "pacientes" not in mensagem
+    assert "Bufete Ficticio Alameda" not in mensagem  # sem o nome desde a segunda rodada
 
 
-def test_defeito_visivel_diz_cliente_fora_da_saude_e_paciente_na_saude():
+@pytest.mark.parametrize("campanha_nicho", ["Fontaneros", "", "NAO_VERIFICADO", None, "Psicólogos y abogados"])
+def test_sem_site_de_nicho_nao_reconhecido_pede_revisao(campanha_nicho):
+    """Controle negativo: nicho fora de `nichos_copy`, ausente, ou que casa
+    com mais de um nicho -- nenhum texto é adivinhado."""
+    with pytest.raises(am.LinhaPedeRevisaoError, match="REVISAR NICHO"):
+        _montar_direta(_linha_csv(campanha_nicho=campanha_nicho))
+
+
+def test_defeito_visivel_e_o_mesmo_texto_em_qualquer_setor():
+    """O `{cliente_paciente}` saiu do texto (08/10/2026): nem "paciente" nem
+    "cliente", dentro ou fora da saúde."""
     fora = _lead(email="info@website.com", nome="Constructora Sol", nicho="Empresa constructora")
     mensagem, _ = _montar("defeito_visivel", fora, _regras_com_defeito())
-    assert "Si un cliente intenta escribirles" in mensagem
     saude, _ = _montar("defeito_visivel", _lead(email="info@website.com"), _regras_com_defeito())
-    assert "Si un paciente intenta escribirles" in saude
+    assert mensagem == saude
+    for palavra in ("paciente", "cliente"):
+        assert palavra not in mensagem.lower()
 
 
 def test_lentidao_nao_exige_setor_saude():
     """O texto de lentidão não fala de paciente: serve a qualquer setor."""
     lead = _lead(lcp_ms=12400, nome="Constructora Sol", nicho="Empresa constructora")
     mensagem, _ = _montar("lentidao", lead)
-    assert "Constructora Sol" in mensagem
+    assert "12 segundos" in mensagem and "Constructora Sol" not in mensagem
 
 
 # --- sem_site: quando o elogio se sustenta ---------------------------------------
@@ -494,9 +583,12 @@ def test_lentidao_nao_exige_setor_saude():
     ("", "", False),
     ("4.8", "0", False),
 ])
-def test_sem_site_so_elogia_com_nota_e_avaliacoes_que_sustentem(nota, avaliacoes, usa_texto_novo):
+def test_sem_site_so_cita_a_nota_com_nota_e_avaliacoes_que_sustentem(nota, avaliacoes, usa_texto_novo):
+    """Os limiares de `sem_site` (nota >= 4,0 e >= 5 avaliações) continuam
+    decidindo entre o texto que cita a nota e o `_sem_reputacao`."""
     mensagem, _ = _montar_direta(_linha_csv(nota=nota, avaliacoes=avaliacoes))
-    assert ("se nota que sus pacientes están contentos" in mensagem) is usa_texto_novo
+    assert ("reseñas, pero sin web propia" in mensagem) is usa_texto_novo
+    assert ("y veo que no tiene web propia" in mensagem) is not usa_texto_novo
     if not usa_texto_novo:
         # cai no texto sem elogio, mas com a apresentação unificada (03/10/2026)
         assert _APRES_NOVA in mensagem and "ayudo a negocios locales" not in mensagem

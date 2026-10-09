@@ -1,113 +1,151 @@
 {
   "_anotado_em": "2026-10-01",
-  "_nota": "Décima primeira rodada (29/09/2026, D12 Fases 3 e 5): vocabulário de saúde ('pacientes', 'consultas', 'otros profesionales', 'qué tratan'/'pedir cita') saiu de 'poucas_avaliacoes' (consequencia + cta), 'sem_site' (cta), 'portal' (fato + cta) e 'rede_social' (consequencia + cta), trocado por termos setor-agnósticos ('opciones', 'clientes', 'otros negocios', 'qué ofrecen'/'contactar') -- fato e regra de escolha do ângulo não mudam, só o vocabulário do texto. 'contato' e 'lentidao' trocam o CTA por oferta da 'Revisión breve' (D12 Fase 4/5): o vídeo deixa de ser CTA de primeira mensagem, passa a evidência opcional DENTRO da revisão, só produzida depois que o lead aceitar. 'construtor' não muda nesta rodada (Fase 5: sem Revisión breve no rollout inicial -- não tem captura automática, `classe_site != 'proprio'`). Modelos FIXOS de primeira mensagem por ângulo (MVP, mudança de rumo decidida pelo diretor em 24/09/2026 -- angulo_mensagem.py). Texto exato aprovado pelo diretor -- editar aqui é editar copy, mesmo cuidado do prompt de IA, mas SEM chamada de LLM nenhuma. {apresentacao} já vem formatado (espaço na frente + ponto no fim) por angulo_mensagem._formatar_apresentacao. Sexta rodada de decisões do diretor (24/09/2026): 'reputacao'/'reputacao_singular' viraram 'poucas_avaliacoes_5_30'/'poucas_avaliacoes_1_4' (+ variantes '_singular', quando só 1 concorrente qualificado -- 've otra' em vez de 've otras') -- a faixa 1-4 avaliações não cita a nota, só {reseñas_palavra} ('reseña' no singular, quando n==1, ou 'reseñas'); 'doctoralia' virou 'portal' (genérico, {portal} resolvido por 'nomes_portal' a partir do domínio do site -- domínio desconhecido usa o próprio domínio, sem 'www.'); 'lentidao_sem_numero' é usada quando o PSI não tem pelo menos 'rodadas_minimas_para_citar_numero' rodadas medidas (config/angulo_regras.json) -- o ângulo não muda, só some o número. Sétima rodada (25/09/2026): 'sem_site_sem_reputacao' e 'portal_sem_reputacao' cobrem nota/avaliações não confirmadas OU 0 avaliações. Oitava rodada (25/09/2026, go-live): entraram 'rede_social'/'rede_social_sem_reputacao' ({rede} por 'nomes_rede') e 'construtor'/'construtor_sem_reputacao' ({constructor} por 'nomes_construtor'); 'superficie_google' passou a reusar os modelos de 'sem_site'. Nona rodada (25/09/2026, especificação final do MVP, diretor + especialista de copy): apresentação nova (config/remetente_apresentacao.json); textos finais de TODOS os modelos revisados por inteiro (poucas_avaliacoes passa a terminar pedindo reseñas em vez de oferecer 'contar o que fazem'; sem_site/portal/rede_social/construtor com pergunta final diferente por ângulo); 'construtor' troca {dominio} (host cru) por {constructor} -- nome do construtor pelo domínio, em 'nomes_construtor' (wordpress.com, wixsite.com, sites.google.com, canva.site -- desconhecido usa o próprio domínio, igual 'nomes_portal'/'nomes_rede'). O canal (WhatsApp/e-mail/'para depois') e a coluna única 'WhatsApp' (decisão do mesmo dia) não mudam texto de modelo nenhum -- são regra de planilha_envio.py. Décima rodada (27/09/2026, as 4 mudanças conceituais -- QUALIFICADOR não inventa fatos; COMERCIAL transforma fato em consequência plausível; copy vende a relevância da conversa antes do serviço; teste A/B da abertura): cada modelo virou TRÊS BLOCOS -- 'fato' (observado), 'consequencia' (implicação plausível em linguagem condicional; null quando o ângulo não tem) e 'cta' (microdecisão, termina em '?'). A mensagem é montada por angulo_mensagem.compor_mensagem: saudacao + abertura da variante (config/remetente_apresentacao.json) + fato + consequencia + cta. O fato começa em minúscula -- depois de uma abertura que termina em ':' fica assim; senão a primeira letra sobe. A estrutura é conferida na carga (angulo_mensagem.carregar_mensagens_angulo) pelo classificador ferramentas/afirmacao.py: fato e cta sem afirmação de resultado; consequencia obrigatoriamente IMPLICACAO_PLAUSIVEL. Saiu de poucas_avaliacoes a história causal não verificada ('el paciente sale contento, pero nadie le pide que lo cuente') e a citação de categoria/cidade/número do concorrente (o concorrente 10x continua sendo a EVIDÊNCIA que escolhe o ângulo, em angulo_regras.json). 'Vi la suya' virou 'vi su ficha de Google' (a abertura B não fala mais da ficha). Textos da especificação do diretor; os que ela não trazia (1-4 avaliações, _singular, _sem_reputacao, construtor) redigidos pelo especialista na mesma estrutura. Décima segunda rodada (01/10/2026, 'Novos templates e ângulos', texto aprovado pelo diretor): 'lentidao' (com número) e 'sem_site' trocam de texto; entram 'lentidao_moderada' e 'defeito_visivel'. Esses quatro modelos trazem 'apresentacao' própria (no lugar de remetente_apresentacao.json), usam {nombre} (nome curto do negócio, angulo_mensagem.nome_curto_seguro -- nome que não limpa com segurança vira linha 'REVISAR NOME', sem mensagem) e declaram em 'excecoes_validacao' as checagens do validador que dispensam ('nome_negocio', 'numeros_por_extenso' = palavras que não contam como número, 'sem_pergunta_final'; e, na carga, 'consequencia_sem_marcador') -- só eles, os demais modelos seguem com todas as checagens. 'exige_setor_saude' (sem_site e defeito_visivel, cujo texto fala de paciente): negócio fora da saúde vira 'REVISAR SETOR', sem mensagem. 'lentidao_sem_numero' e 'sem_site_sem_reputacao' NÃO mudaram (a tarefa não trouxe texto novo para eles). 'defeito_visivel' só dispara com 'defeito_visivel.ativo' em angulo_regras.json (desligado até aprovar os padrões). Respostas do diretor (01/10/2026, segunda rodada): 'lentidao' troca 'dos cosas que lo mejorarían' por 'algunas ideas para mejorarlo' (a exceção do número 'dos' deixa de existir); 'defeito_visivel' ganha o texto corrigido ('aparece el correo {texto_encontrado}') e {cliente_paciente} ('paciente' em saúde, 'cliente' nos demais -- por isso deixa de exigir setor de saúde).",
+  "_nota": "Décima primeira rodada (29/09/2026, D12 Fases 3 e 5): vocabulário de saúde ('pacientes', 'consultas', 'otros profesionales', 'qué tratan'/'pedir cita') saiu de 'poucas_avaliacoes' (consequencia + cta), 'sem_site' (cta), 'portal' (fato + cta) e 'rede_social' (consequencia + cta), trocado por termos setor-agnósticos ('opciones', 'clientes', 'otros negocios', 'qué ofrecen'/'contactar') -- fato e regra de escolha do ângulo não mudam, só o vocabulário do texto. 'contato' e 'lentidao' trocam o CTA por oferta da 'Revisión breve' (D12 Fase 4/5): o vídeo deixa de ser CTA de primeira mensagem, passa a evidência opcional DENTRO da revisão, só produzida depois que o lead aceitar. 'construtor' não muda nesta rodada (Fase 5: sem Revisión breve no rollout inicial -- não tem captura automática, `classe_site != 'proprio'`). Modelos FIXOS de primeira mensagem por ângulo (MVP, mudança de rumo decidida pelo diretor em 24/09/2026 -- angulo_mensagem.py). Texto exato aprovado pelo diretor -- editar aqui é editar copy, mesmo cuidado do prompt de IA, mas SEM chamada de LLM nenhuma. {apresentacao} já vem formatado (espaço na frente + ponto no fim) por angulo_mensagem._formatar_apresentacao. Sexta rodada de decisões do diretor (24/09/2026): 'reputacao'/'reputacao_singular' viraram 'poucas_avaliacoes_5_30'/'poucas_avaliacoes_1_4' (+ variantes '_singular', quando só 1 concorrente qualificado -- 've otra' em vez de 've otras') -- a faixa 1-4 avaliações não cita a nota, só {reseñas_palavra} ('reseña' no singular, quando n==1, ou 'reseñas'); 'doctoralia' virou 'portal' (genérico, {portal} resolvido por 'nomes_portal' a partir do domínio do site -- domínio desconhecido usa o próprio domínio, sem 'www.'); 'lentidao_sem_numero' é usada quando o PSI não tem pelo menos 'rodadas_minimas_para_citar_numero' rodadas medidas (config/angulo_regras.json) -- o ângulo não muda, só some o número. Sétima rodada (25/09/2026): 'sem_site_sem_reputacao' e 'portal_sem_reputacao' cobrem nota/avaliações não confirmadas OU 0 avaliações. Oitava rodada (25/09/2026, go-live): entraram 'rede_social'/'rede_social_sem_reputacao' ({rede} por 'nomes_rede') e 'construtor'/'construtor_sem_reputacao' ({constructor} por 'nomes_construtor'); 'superficie_google' passou a reusar os modelos de 'sem_site'. Nona rodada (25/09/2026, especificação final do MVP, diretor + especialista de copy): apresentação nova (config/remetente_apresentacao.json); textos finais de TODOS os modelos revisados por inteiro (poucas_avaliacoes passa a terminar pedindo reseñas em vez de oferecer 'contar o que fazem'; sem_site/portal/rede_social/construtor com pergunta final diferente por ângulo); 'construtor' troca {dominio} (host cru) por {constructor} -- nome do construtor pelo domínio, em 'nomes_construtor' (wordpress.com, wixsite.com, sites.google.com, canva.site -- desconhecido usa o próprio domínio, igual 'nomes_portal'/'nomes_rede'). O canal (WhatsApp/e-mail/'para depois') e a coluna única 'WhatsApp' (decisão do mesmo dia) não mudam texto de modelo nenhum -- são regra de planilha_envio.py. Décima rodada (27/09/2026, as 4 mudanças conceituais -- QUALIFICADOR não inventa fatos; COMERCIAL transforma fato em consequência plausível; copy vende a relevância da conversa antes do serviço; teste A/B da abertura): cada modelo virou TRÊS BLOCOS -- 'fato' (observado), 'consequencia' (implicação plausível em linguagem condicional; null quando o ângulo não tem) e 'cta' (microdecisão, termina em '?'). A mensagem é montada por angulo_mensagem.compor_mensagem: saudacao + abertura da variante (config/remetente_apresentacao.json) + fato + consequencia + cta. O fato começa em minúscula -- depois de uma abertura que termina em ':' fica assim; senão a primeira letra sobe. A estrutura é conferida na carga (angulo_mensagem.carregar_mensagens_angulo) pelo classificador ferramentas/afirmacao.py: fato e cta sem afirmação de resultado; consequencia obrigatoriamente IMPLICACAO_PLAUSIVEL. Saiu de poucas_avaliacoes a história causal não verificada ('el paciente sale contento, pero nadie le pide que lo cuente') e a citação de categoria/cidade/número do concorrente (o concorrente 10x continua sendo a EVIDÊNCIA que escolhe o ângulo, em angulo_regras.json). 'Vi la suya' virou 'vi su ficha de Google' (a abertura B não fala mais da ficha). Textos da especificação do diretor; os que ela não trazia (1-4 avaliações, _singular, _sem_reputacao, construtor) redigidos pelo especialista na mesma estrutura. Décima segunda rodada (01/10/2026, 'Novos templates e ângulos', texto aprovado pelo diretor): 'lentidao' (com número) e 'sem_site' trocam de texto; entram 'lentidao_moderada' e 'defeito_visivel'. Esses quatro modelos trazem 'apresentacao' própria (no lugar de remetente_apresentacao.json), usam {nombre} (nome curto do negócio, angulo_mensagem.nome_curto_seguro -- nome que não limpa com segurança vira linha 'REVISAR NOME', sem mensagem) e declaram em 'excecoes_validacao' as checagens do validador que dispensam ('nome_negocio', 'numeros_por_extenso' = palavras que não contam como número, 'sem_pergunta_final'; e, na carga, 'consequencia_sem_marcador') -- só eles, os demais modelos seguem com todas as checagens. 'exige_setor_saude' (sem_site e defeito_visivel, cujo texto fala de paciente): negócio fora da saúde vira 'REVISAR SETOR', sem mensagem. 'lentidao_sem_numero' e 'sem_site_sem_reputacao' NÃO mudaram (a tarefa não trouxe texto novo para eles). 'defeito_visivel' só dispara com 'defeito_visivel.ativo' em angulo_regras.json (desligado até aprovar os padrões). Respostas do diretor (01/10/2026, segunda rodada): 'lentidao' troca 'dos cosas que lo mejorarían' por 'algunas ideas para mejorarlo' (a exceção do número 'dos' deixa de existir); 'defeito_visivel' ganha o texto corrigido ('aparece el correo {texto_encontrado}') e {cliente_paciente} ('paciente' em saúde, 'cliente' nos demais -- por isso deixa de exigir setor de saúde). Bloco de copy, Fase 1 (08/10/2026, diretor): apresentação global logo depois da saudação ('Hola, buenas. Soy Douglas, diseñador web.') e os modelos reescritos não trazem mais 'apresentacao' própria; pretérito perfeito composto (espanhol da Espanha); 'sem_site'/'sem_site_sem_reputacao' viram um par por nicho ('__psicologos', '__abogados', '__arquitectos', escolhido por nichos_copy de angulo_regras.json), sem exigir setor de saúde, fecho '¿Le preparo un ejemplo…?'; Nata com fecho 'captura' ('contato', 'lentidao', 'lentidao_sem_numero', 'defeito_visivel' -- este agora termina em pergunta e não usa mais {cliente_paciente}); 'lentidao' cita a medição de laboratório (ferramenta de velocidade do Google, modo móvil) e a consequência pelo comportamento de quem busca; 'poucas_avaliacoes' cita {nombre} e {negocio}/{negocios} (vocabulario_nicho) e oferece pôr a ficha em dia. 'portal', 'rede_social' e 'construtor' continuam neutros em relação ao nicho; 'lentidao_moderada' não mudou (desligada em angulo_regras.json). Segunda rodada da Fase 1 (08/10/2026, decisões do diretor delegadas ao supervisor): NENHUM modelo usa mais {nombre} -- o negócio é 'su web' / 'su ficha de Google' (gramática no usted), e a exceção 'nome_negocio' saiu de todos, então o validador volta a recusar o nome do negócio em qualquer mensagem; 'portal', 'rede_social' e 'construtor' passam ao perfeito composto ('he visto su ficha'); 'lentidao_moderada' manteve o texto, sem o nome, com a apresentação nova. Os textos de 'poucas_avaliacoes' e 'lentidao_sem_numero' ficam guardados aqui, mas os ângulos estão desligados em angulo_regras.json. Correções só de redação, da leitura de linguagem do mesmo dia: 'he visto su ficha de Google y veo que no tiene web propia'; 'asuntos como el que tiene'; 'sus especialidades' (no lugar de 'áreas de práctica'); 'tarda ... en cargar'; nos neutros, usted no singular em todos ('¿Le llegan...', 'contactar con usted', 'encontrarle', '¿La ha montado usted?'), subjuntivo ('quien quiera') e 'otros profesionales'. A apresentação global (remetente_apresentacao.json) passou, nesta segunda rodada, de 'Soy Douglas, diseñador web.' a 'Soy Douglas, diseño webs.' -- o trecho da primeira rodada acima cita a anterior, que é histórico. 09/10/2026 (diretor, P1 da verificação): domínio fora de nomes_portal / nomes_rede / nomes_construtor não entra mais na mensagem -- vira o termo de 'termos_genericos' ({portal}/{rede}/{constructor} no fato, {portal_ref}/{rede_ref} no CTA); 'construtor' passou a 'su web está alojada en {constructor}, sin dominio propio', que funciona com o nome ('Wix') e com o termo genérico; o validador recusa qualquer domínio na mensagem, exceto o e-mail citado pelo 'defeito_visivel'.",
   "saudacao": "Hola, buenas.",
   "contato": {
-    "fato": "entré en su web desde el móvil y el teléfono aparece, pero no se puede pulsar para llamar; hay que copiarlo a mano.",
-    "consequencia": "Es un paso pequeño, pero añade una fricción justo cuando alguien quiere contactar.",
-    "cta": "Si le sirve, puedo prepararle una revisión breve con lo que he encontrado, ¿se la envío?"
+    "fato": "he entrado en su web desde el móvil y el teléfono aparece, pero no se puede pulsar para llamar: hay que copiarlo a mano.",
+    "consequencia": null,
+    "cta": "¿Le paso una captura marcando dónde está?"
   },
   "poucas_avaliacoes_5_30": {
-    "fato": "vi su ficha de Google, un {nota} de media, pero con solo {n} reseñas.",
-    "consequencia": "Cuando alguien compara varias opciones en Google, puede encontrarse con otras que tienen muchas más reseñas.",
-    "cta": "¿Suelen pedir a los clientes que les dejen una reseña?"
+    "fato": "he visto su ficha de Google: un {nota} de media con {n} reseñas, y en la misma búsqueda salen otros {negocios} con muchas más.",
+    "consequencia": null,
+    "cta": "También pongo al día fichas de Google: ¿le paso un par de cambios concretos para la suya?"
   },
   "poucas_avaliacoes_5_30_singular": {
-    "fato": "vi su ficha de Google, un {nota} de media, pero con solo {n} reseñas.",
-    "consequencia": "Cuando alguien compara varias opciones en Google, puede encontrarse con otra que tiene muchas más reseñas.",
-    "cta": "¿Suelen pedir a los clientes que les dejen una reseña?"
+    "fato": "he visto su ficha de Google: un {nota} de media con {n} reseñas, y en la misma búsqueda sale otro {negocio} con muchas más.",
+    "consequencia": null,
+    "cta": "También pongo al día fichas de Google: ¿le paso un par de cambios concretos para la suya?"
   },
   "poucas_avaliacoes_1_4": {
-    "fato": "vi su ficha de Google, que todavía tiene solo {n} {reseñas_palavra}.",
-    "consequencia": "Cuando alguien compara varias opciones en Google, puede encontrarse con otras que tienen muchas más reseñas.",
-    "cta": "¿Suelen pedir a los clientes que les dejen una reseña?"
+    "fato": "he visto su ficha de Google, que tiene {n} {reseñas_palavra}, y en la misma búsqueda salen otros {negocios} con muchas más.",
+    "consequencia": null,
+    "cta": "También pongo al día fichas de Google: ¿le paso un par de cambios concretos para la suya?"
   },
   "poucas_avaliacoes_1_4_singular": {
-    "fato": "vi su ficha de Google, que todavía tiene solo {n} {reseñas_palavra}.",
-    "consequencia": "Cuando alguien compara varias opciones en Google, puede encontrarse con otra que tiene muchas más reseñas.",
-    "cta": "¿Suelen pedir a los clientes que les dejen una reseña?"
+    "fato": "he visto su ficha de Google, que tiene {n} {reseñas_palavra}, y en la misma búsqueda sale otro {negocio} con muchas más.",
+    "consequencia": null,
+    "cta": "También pongo al día fichas de Google: ¿le paso un par de cambios concretos para la suya?"
   },
   "lentidao": {
-    "apresentacao": "Soy Douglas, diseñador web.",
-    "fato": "abrí la web de {nombre} desde el móvil y tardó unos {segundos} segundos en mostrar el contenido.",
-    "consequencia": "Mucha gente que busca desde el móvil no espera tanto y pasa al siguiente resultado de Google.",
-    "cta": "Le he apuntado lo que vi y algunas ideas para mejorarlo. ¿Se lo paso por aquí?",
+    "fato": "he probado su web con el test de velocidad de Google para móvil y tarda unos {segundos} segundos en cargar.",
+    "consequencia": "Quien busca desde el móvil y tiene que esperar tanto suele volver atrás y llamar al siguiente de la lista.",
+    "cta": "¿Le paso una captura del resultado?",
     "excecoes_validacao": {
-      "nome_negocio": true,
       "consequencia_sem_marcador": true
     }
   },
   "lentidao_sem_numero": {
-    "fato": "abrí su web desde el móvil y estuve bastante rato esperando a que apareciera el contenido.",
-    "consequencia": "Para alguien que entra desde el móvil para ver la información o contactar, esa espera puede resultar una fricción.",
-    "cta": "Si le sirve, puedo prepararle una revisión breve con lo que he encontrado, ¿se la envío?"
+    "fato": "he probado su web con el test de velocidad de Google para móvil y tarda bastante en cargar.",
+    "consequencia": "Quien busca desde el móvil y tiene que esperar tanto suele volver atrás y llamar al siguiente de la lista.",
+    "cta": "¿Le paso una captura del resultado?",
+    "excecoes_validacao": {
+      "consequencia_sem_marcador": true
+    }
   },
   "lentidao_moderada": {
-    "apresentacao": "Soy Douglas, diseñador web.",
-    "fato": "abrí la web de {nombre} desde el móvil y tardó unos {segundos} segundos en cargar.",
+    "apresentacao": "Soy Douglas, diseño webs.",
+    "fato": "abrí su web desde el móvil y tardó unos {segundos} segundos en cargar.",
     "consequencia": "No es grave, pero en el móvil se nota y suele tener arreglo fácil.",
     "cta": "Si quiere, le paso lo que vi. ¿Se lo envío?",
     "excecoes_validacao": {
-      "nome_negocio": true,
       "consequencia_sem_marcador": true
     }
   },
   "defeito_visivel": {
-    "apresentacao": "Soy Douglas, diseñador web.",
-    "fato": "revisando su web vi que aparece el correo \"{texto_encontrado}\", que parece un texto de la plantilla que quedó sin cambiar.",
-    "consequencia": "Si un {cliente_paciente} intenta escribirles ahí, el correo no les llega.",
-    "cta": "Se lo comento por si no lo sabían. Si quiere, le paso un par de detalles más que vi.",
-    "excecoes_validacao": {
-      "nome_negocio": true,
-      "consequencia_sem_marcador": true,
-      "sem_pergunta_final": true
-    }
+    "fato": "en su web aparece el correo \"{texto_encontrado}\", que parece de la plantilla y se ha quedado sin cambiar.",
+    "consequencia": "Es posible que lo que le escriban ahí no le esté llegando.",
+    "cta": "¿Le paso una captura de dónde aparece?"
   },
-  "sem_site": {
-    "apresentacao": "Soy Douglas, diseñador web.",
-    "exige_setor_saude": true,
-    "fato": "vi su ficha en Google: un {nota} con {n} reseñas, se nota que sus pacientes están contentos.",
-    "consequencia": "Pero quien quiere ver tratamientos o cómo funciona la primera cita antes de llamar no tiene una web a la que ir.",
-    "cta": "Le puedo enseñar un ejemplo de cómo quedaría una página sencilla para {nombre}. ¿Le interesa verlo?",
+  "sem_site__psicologos": {
+    "fato": "he visto su ficha de Google: un {nota} con {n} reseñas, pero sin web propia.",
+    "consequencia": "Antes de pedir una primera sesión, mucha gente quiere saber cómo es la terapia y desde qué orientación trabaja, y eso en la ficha no cabe.",
+    "cta": "¿Le preparo un ejemplo de cómo quedaría una página sencilla para su consulta?",
     "excecoes_validacao": {
-      "nome_negocio": true,
       "consequencia_sem_marcador": true
     }
   },
-  "sem_site_sem_reputacao": {
-    "fato": "vi su ficha de Google y me llamó la atención que no tenga una web propia.",
-    "consequencia": "Si alguien quiere ampliar información después de encontrarla en Google, hoy solo puede hacerlo por otro canal.",
-    "cta": "¿Hoy la gente les encuentra más por Google o por recomendación?"
+  "sem_site_sem_reputacao__psicologos": {
+    "fato": "he visto su ficha de Google y veo que no tiene web propia.",
+    "consequencia": "Antes de pedir una primera sesión, mucha gente quiere saber cómo es la terapia y desde qué orientación trabaja, y eso en la ficha no cabe.",
+    "cta": "¿Le preparo un ejemplo de cómo quedaría una página sencilla para su consulta?",
+    "excecoes_validacao": {
+      "consequencia_sem_marcador": true
+    }
+  },
+  "sem_site__abogados": {
+    "fato": "he visto su ficha de Google: un {nota} con {n} reseñas, pero sin web propia.",
+    "consequencia": "Quien tiene un problema legal suele buscar primero si el despacho lleva asuntos como el que tiene, y eso en la ficha no se ve.",
+    "cta": "¿Le preparo un ejemplo de cómo quedaría una página sencilla con sus especialidades?",
+    "excecoes_validacao": {
+      "consequencia_sem_marcador": true
+    }
+  },
+  "sem_site_sem_reputacao__abogados": {
+    "fato": "he visto su ficha de Google y veo que no tiene web propia.",
+    "consequencia": "Quien tiene un problema legal suele buscar primero si el despacho lleva asuntos como el que tiene, y eso en la ficha no se ve.",
+    "cta": "¿Le preparo un ejemplo de cómo quedaría una página sencilla con sus especialidades?",
+    "excecoes_validacao": {
+      "consequencia_sem_marcador": true
+    }
+  },
+  "sem_site__arquitectos": {
+    "fato": "he visto su ficha de Google: un {nota} con {n} reseñas, pero sin web propia.",
+    "consequencia": "Antes de llamar a un estudio, mucha gente quiere ver obra realizada, y en la ficha solo caben unas fotos sueltas.",
+    "cta": "¿Le preparo un ejemplo de cómo quedaría una página limpia con sus proyectos?",
+    "excecoes_validacao": {
+      "consequencia_sem_marcador": true
+    }
+  },
+  "sem_site_sem_reputacao__arquitectos": {
+    "fato": "he visto su ficha de Google y veo que no tiene web propia.",
+    "consequencia": "Antes de llamar a un estudio, mucha gente quiere ver obra realizada, y en la ficha solo caben unas fotos sueltas.",
+    "cta": "¿Le preparo un ejemplo de cómo quedaría una página limpia con sus proyectos?",
+    "excecoes_validacao": {
+      "consequencia_sem_marcador": true
+    }
+  },
+  "vocabulario_nicho": {
+    "_nota": "Palavra do nicho em poucas_avaliacoes ({negocio}/{negocios}). Uma entrada por chave de nichos_copy (config/angulo_regras.json).",
+    "psicologos": {"negocio": "profesional", "negocios": "profesionales"},
+    "abogados": {"negocio": "despacho", "negocios": "despachos"},
+    "arquitectos": {"negocio": "estudio", "negocios": "estudios"}
   },
   "portal": {
-    "fato": "vi su ficha de Google, un {nota} con {n} reseñas, y el enlace lleva a {portal}, donde también aparecen otros negocios.",
+    "fato": "he visto su ficha de Google, un {nota} con {n} reseñas, y el enlace lleva a {portal}, donde también aparecen otros profesionales.",
     "consequencia": null,
-    "cta": "¿Les llegan muchos clientes a través de {portal}, o más por otras vías?"
+    "cta": "¿Le llegan muchos clientes a través de {portal_ref} o más por otras vías?"
   },
   "portal_sem_reputacao": {
-    "fato": "vi su ficha de Google y el enlace lleva a {portal}, donde también aparecen otros negocios.",
+    "fato": "he visto su ficha de Google y el enlace lleva a {portal}, donde también aparecen otros profesionales.",
     "consequencia": null,
-    "cta": "¿Les llegan muchos clientes a través de {portal}, o más por otras vías?"
+    "cta": "¿Le llegan muchos clientes a través de {portal_ref} o más por otras vías?"
   },
   "rede_social": {
-    "fato": "vi su ficha de Google, un {nota} con {n} reseñas, y el enlace lleva a {rede}.",
-    "consequencia": "Para alguien que quiere saber qué ofrecen o cómo contactar, puede resultar menos directo que una web propia.",
-    "cta": "¿Les escriben muchos clientes por {rede}?"
+    "fato": "he visto su ficha de Google, un {nota} con {n} reseñas, y el enlace lleva a {rede}.",
+    "consequencia": "Para quien quiera saber qué ofrece o cómo contactar con usted, eso puede resultar menos directo que una web propia.",
+    "cta": "¿Le escriben muchos clientes por {rede_ref}?"
   },
   "rede_social_sem_reputacao": {
-    "fato": "vi su ficha de Google y el enlace lleva a {rede}.",
-    "consequencia": "Para alguien que quiere saber qué ofrecen o cómo contactar, puede resultar menos directo que una web propia.",
-    "cta": "¿Les escriben muchos clientes por {rede}?"
+    "fato": "he visto su ficha de Google y el enlace lleva a {rede}.",
+    "consequencia": "Para quien quiera saber qué ofrece o cómo contactar con usted, eso puede resultar menos directo que una web propia.",
+    "cta": "¿Le escriben muchos clientes por {rede_ref}?"
   },
   "construtor": {
-    "fato": "vi su ficha de Google, un {nota} con {n} reseñas, y su web está en una dirección de {constructor}, sin dominio propio.",
-    "consequencia": "Para alguien que quiere volver a encontrarles, una dirección propia puede ser más fácil de recordar.",
-    "cta": "¿La montaron ustedes mismos?"
+    "fato": "he visto su ficha de Google, un {nota} con {n} reseñas, y su web está alojada en {constructor}, sin dominio propio.",
+    "consequencia": "Para quien quiera volver a encontrarle, una dirección propia puede ser más fácil de recordar.",
+    "cta": "¿La ha montado usted?"
   },
   "construtor_sem_reputacao": {
-    "fato": "vi su ficha de Google y su web está en una dirección de {constructor}, sin dominio propio.",
-    "consequencia": "Para alguien que quiere volver a encontrarles, una dirección propia puede ser más fácil de recordar.",
-    "cta": "¿La montaron ustedes mismos?"
+    "fato": "he visto su ficha de Google y su web está alojada en {constructor}, sin dominio propio.",
+    "consequencia": "Para quien quiera volver a encontrarle, una dirección propia puede ser más fácil de recordar.",
+    "cta": "¿La ha montado usted?"
+  },
+  "termos_genericos": {
+    "_nota": "09/10/2026 (diretor): domínio fora de nomes_portal / nomes_rede / nomes_construtor nunca entra na mensagem (sairia como link e podia trazer o nome do negócio). 'nome' vai no fato, 'referencia' no CTA; para domínio do mapa, as duas formas são o nome legível.",
+    "portal": {"nome": "una plataforma externa", "referencia": "esa plataforma"},
+    "rede": {"nome": "una red social", "referencia": "esa red social"},
+    "constructor": {"nome": "una plataforma externa", "referencia": "esa plataforma"}
   },
   "nomes_portal": {
     "doctoralia.es": "Doctoralia",

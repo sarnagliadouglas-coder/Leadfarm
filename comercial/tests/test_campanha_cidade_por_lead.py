@@ -36,14 +36,16 @@ def test_lead_sem_cidade_pede_revisao_nunca_adivinha(cidade):
 
 def test_mensagem_direta_usa_a_cidade_da_linha_do_csv():
     """Ponta da Geral: `montar_mensagem_direta` passa a `campanha_cidade` da linha do CSV humano."""
+    # bloco de copy, Fase 1 (08/10/2026): o modelo de sem_site é o do nicho da campanha
     mensagens = {"saudacao": "Hola, buenas.",
-                 "sem_site_sem_reputacao": {"fato": "vi {nombre} en Google Maps.", "cta": "¿Hablamos?"}}
-    linha = {"nome": "Lunaria Murcia", "nicho": "Teste", "campanha_cidade": "Murcia"}
-    _, entrada = am.montar_mensagem_direta("sem_site", linha, apresentacao="", mensagens=mensagens)
+                 "sem_site_sem_reputacao__arquitectos": {"fato": "vi {nombre} en Google Maps.", "cta": "¿Hablamos?"}}
+    regras = {"nichos_copy": {"arquitectos": ["arquitect"]}}
+    linha = {"nome": "Lunaria Murcia", "nicho": "Teste", "campanha_cidade": "Murcia", "campanha_nicho": "Arquitectos"}
+    _, entrada = am.montar_mensagem_direta("sem_site", linha, apresentacao="", mensagens=mensagens, regras=regras)
     assert entrada["nombre"] == "Lunaria"
     linha_elche = {**linha, "campanha_cidade": "Elche"}
-    _, entrada2 = am.montar_mensagem_direta("sem_site", linha_elche, apresentacao="", mensagens=mensagens)
+    _, entrada2 = am.montar_mensagem_direta("sem_site", linha_elche, apresentacao="", mensagens=mensagens, regras=regras)
     assert entrada2["nombre"] == "Lunaria Murcia"  # controle: outra cidade não corta "Murcia"
     sem_cidade = {k: v for k, v in linha.items() if k != "campanha_cidade"}
     with pytest.raises(am.LinhaPedeRevisaoError):
-        am.montar_mensagem_direta("sem_site", sem_cidade, apresentacao="", mensagens=mensagens)
+        am.montar_mensagem_direta("sem_site", sem_cidade, apresentacao="", mensagens=mensagens, regras=regras)

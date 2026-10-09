@@ -1,17 +1,27 @@
 {
   "_anotado_em": "2026-09-24",
-  "_nota": "Regras de escolha do ângulo da primeira mensagem (MVP, mudança de rumo decidida pelo diretor em 24/09/2026 -- angulo_mensagem.py). Para nata e candidatos_triagem, nesta ordem: 'contato' (telefone_na_pagina == 'texto') -> 'poucas_avaliacoes' (nota/avaliações/concorrente, limiares abaixo) -> 'lentidao' (lcp_minimo_ms) -> 'sem_angulo'. Nunca fixo no código. 'poucas_avaliacoes' renomeado de 'reputacao' na sexta rodada de decisões do diretor (mesmo dia): nota mínima caiu de 4,5 para 4,0, multiplicador do concorrente subiu de 5x para 10x, e passou a exigir avaliacoes_minimo (1) -- faixa 1-30, com dois modelos de mensagem (1 a 4 avaliações não cita a nota; 5 a 30 cita). Rodada de 01/10/2026 (templates novos, diretor): 'lentidao_moderada' (LCP de lcp_minimo_ms até lentidao.lcp_minimo_ms, exclusive -- 5.000 a 9.999 ms; só com a mesma medição consistente de 'lentidao', porque o texto cita os segundos e não tem variante sem número); 'defeito_visivel' (ordem: logo antes da lentidão; DESLIGADO -- 'ativo': false e sem padrões até o diretor aprovar a lista; só tipo 'email' aciona o ângulo); 'sem_site' (nota e avaliações mínimas para o texto que elogia -- ASSUNÇÃO do especialista, a tarefa não trouxe limiares: abaixo disso usa 'sem_site_sem_reputacao'); 'nome_curto' (limites do {nombre}); 'setor_saude' (radicais de palavra -- o CSV humano da pista Direta não traz o nicho, decide pelo nome). Segunda rodada (01/10/2026, diretor): 'defeito_visivel' ATIVO e com prioridade total (antes de todos os ângulos); padrões de tipo 'email' acionam o ângulo; os de outros tipos só são detectados e registrados no Aviso (sem mensagem de defeito). Lista de padrões aprovada como proposta. Terceira rodada (01/10/2026, diretor): 'nome_curto' -- a cidade da busca no FIM do nome é removida (com ou sem separador); se o que sobra é vazio ou só 'palavras_genericas' (mais o nicho do lead), continua REVISAR NOME.",
+  "_nota": "Regras de escolha do ângulo da primeira mensagem (MVP, mudança de rumo decidida pelo diretor em 24/09/2026 -- angulo_mensagem.py). Para nata e candidatos_triagem, nesta ordem: 'contato' (telefone_na_pagina == 'texto') -> 'poucas_avaliacoes' (nota/avaliações/concorrente, limiares abaixo) -> 'lentidao' (lcp_minimo_ms) -> 'sem_angulo'. Nunca fixo no código. 'poucas_avaliacoes' renomeado de 'reputacao' na sexta rodada de decisões do diretor (mesmo dia): nota mínima caiu de 4,5 para 4,0, multiplicador do concorrente subiu de 5x para 10x, e passou a exigir avaliacoes_minimo (1) -- faixa 1-30, com dois modelos de mensagem (1 a 4 avaliações não cita a nota; 5 a 30 cita). Rodada de 01/10/2026 (templates novos, diretor): 'lentidao_moderada' (LCP de lcp_minimo_ms até lentidao.lcp_minimo_ms, exclusive -- 5.000 a 9.999 ms; só com a mesma medição consistente de 'lentidao', porque o texto cita os segundos e não tem variante sem número); 'defeito_visivel' (ordem: logo antes da lentidão; DESLIGADO -- 'ativo': false e sem padrões até o diretor aprovar a lista; só tipo 'email' aciona o ângulo); 'sem_site' (nota e avaliações mínimas para o texto que elogia -- ASSUNÇÃO do especialista, a tarefa não trouxe limiares: abaixo disso usa 'sem_site_sem_reputacao'); 'nome_curto' (limites do {nombre}); 'setor_saude' (radicais de palavra -- o CSV humano da pista Direta não traz o nicho, decide pelo nome). Segunda rodada (01/10/2026, diretor): 'defeito_visivel' ATIVO e com prioridade total (antes de todos os ângulos); padrões de tipo 'email' acionam o ângulo; os de outros tipos só são detectados e registrados no Aviso (sem mensagem de defeito). Lista de padrões aprovada como proposta. Terceira rodada (01/10/2026, diretor): 'nome_curto' -- a cidade da busca no FIM do nome é removida (com ou sem separador); se o que sobra é vazio ou só 'palavras_genericas' (mais o nicho do lead), continua REVISAR NOME. Bloco de copy, Fase 1 (08/10/2026, diretor): ordem da Nata passa a 'defeito_visivel' (e-mail de modelo) -> 'contato' -> 'lentidao' -> 'poucas_avaliacoes'; 'lentidao_moderada' DESLIGADA ('ativo': false; religada, entra logo depois de 'lentidao'); 'poucas_avaliacoes' não é usado nos nichos de 'nichos_excluidos' (psicólogos) nem em lead de nicho não reconhecido; 'nichos_copy' decide o texto da Direta pelo nicho da campanha; 'setor_saude' deixou de ser exigido por 'sem_site' (os textos são por nicho). Segunda rodada da Fase 1 (08/10/2026, decisões do diretor delegadas ao supervisor): 'poucas_avaliacoes.ativo' = false (desligado para TODOS os nichos nesta fase; 'nichos_excluidos' fica para quando religar) e 'lentidao.sem_numero_ativo' = false (lead com uma medição só fica sem ângulo; a lentidão com número continua). Ordem ativa da Nata: 'defeito_visivel' (e-mail de modelo) -> 'contato' -> 'lentidao' com número (>= 10 s). 'nome_curto' segue na config, mas nenhum modelo usa mais {nombre}.",
+  "nichos_copy": {
+    "_nota": "08/10/2026, diretor (bloco de copy, Fase 1): o texto da Direta e o vocabulário de poucas_avaliacoes saem do nicho da CAMPANHA do lead (campanha_nicho), não da categoria do Google. Cada chave é um nicho de copy; a lista são radicais procurados no campanha_nicho, sem acento e sem maiúscula. Nenhum radical ou mais de um nicho = nicho não reconhecido: a linha que depende dele sai REVISAR NICHO, sem mensagem -- nunca um nicho adivinhado.",
+    "psicologos": ["psicolog"],
+    "abogados": ["abogad"],
+    "arquitectos": ["arquitect"]
+  },
   "poucas_avaliacoes": {
+    "ativo": false,
     "nota_minima": 4.0,
     "avaliacoes_minimo": 1,
     "avaliacoes_maximo": 30,
-    "multiplicador_concorrente_minimo": 10
+    "multiplicador_concorrente_minimo": 10,
+    "nichos_excluidos": ["psicologos"]
   },
   "lentidao": {
     "lcp_minimo_ms": 10000,
-    "rodadas_minimas_para_citar_numero": 2
+    "rodadas_minimas_para_citar_numero": 2,
+    "sem_numero_ativo": false
   },
   "lentidao_moderada": {
+    "ativo": false,
     "lcp_minimo_ms": 5000
   },
   "defeito_visivel": {

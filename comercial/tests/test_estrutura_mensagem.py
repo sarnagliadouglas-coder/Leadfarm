@@ -29,8 +29,10 @@ _APRESENTACAO_REAL = am.carregar_apresentacao()
 
 _VALORES = dict(nota="4,8", n=8, reseñas_palavra="reseñas", s=11, portal="Top Doctors", rede="Instagram",
                 constructor="WordPress", nombre="Clínica Sol", segundos=11, texto_encontrado="info@website.com",
-                cliente_paciente="paciente")
-_ENTRADA = {"nota_google": "4,8", "avaliacoes_google": 8, "segundos": 11}
+                cliente_paciente="paciente", negocio="despacho", negocios="despachos",
+                portal_ref="Top Doctors", rede_ref="Instagram", constructor_ref="WordPress")
+# o e-mail citado pelo defeito_visivel é a única exceção da checagem de domínio (09/10/2026)
+_ENTRADA = {"nota_google": "4,8", "avaliacoes_google": 8, "segundos": 11, "texto_encontrado": "info@website.com"}
 
 
 # --- classificador --------------------------------------------------------------
@@ -126,8 +128,9 @@ def test_estrutura_rejeita_consequencia_que_e_so_fato():
 
 
 def test_estrutura_rejeita_fato_que_afirma_resultado():
-    mensagens = _com("sem_site", fato="está perdiendo pacientes porque no tiene web.")
-    assert any("sem_site.fato" in p for p in am.problemas_de_estrutura(mensagens, _AFIRMACAO))
+    # bloco de copy, Fase 1 (08/10/2026): "sem_site" virou um par por nicho
+    mensagens = _com("sem_site__abogados", fato="está perdiendo clientes porque no tiene web.")
+    assert any("sem_site__abogados.fato" in p for p in am.problemas_de_estrutura(mensagens, _AFIRMACAO))
 
 
 def test_estrutura_rejeita_cta_sem_pergunta():
@@ -203,8 +206,9 @@ def test_apresentacao_real_e_universal():
     setor nem menção a Google Business Profile (D12 Fases 1-3). Substitui os
     testes antigos de A/B (`carregar_aberturas`, variantes, segmento) --
     removidos com o mecanismo que testavam, não afrouxados."""
-    # unificada em 03/10/2026; sem cidade desde 06/10/2026 (diretor, multicidade)
-    assert _APRESENTACAO_REAL == "Soy Douglas, diseñador web."
+    # unificada em 03/10/2026; sem cidade desde 06/10/2026 (diretor, multicidade);
+    # "diseño webs" desde 08/10/2026 (bloco de copy, Fase 1: cabe o fato na prévia do WhatsApp)
+    assert _APRESENTACAO_REAL == "Soy Douglas, diseño webs."
     for termo in ("salud", "consultas", "pacientes", "psicólog", "médic", "ficha de Google", "{segment_positioning}"):
         assert termo not in _APRESENTACAO_REAL
 

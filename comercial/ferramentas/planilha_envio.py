@@ -146,8 +146,11 @@ COLUNAS_NATA = (
 ) + COLUNAS_DIRETOR + ("Aviso", "Contexto para IA", "place_id") + COLUNAS_CAMPANHA
 
 STATUS_SEM_MENSAGEM = "sem mensagem gerada"
-# Lead com ângulo cuja mensagem não sai pronta (nome sem corte seguro, setor
-# fora da saúde): o operador revisa antes -- `Aviso` traz o motivo.
+# Lead com ângulo cuja mensagem não sai pronta (`LinhaPedeRevisaoError`): o
+# operador revisa antes -- `Aviso` traz o motivo. Com a config de 08/10/2026
+# o caso que existe é REVISAR NICHO (lead sem site de nicho sem texto, na aba
+# Geral); REVISAR NOME e REVISAR SETOR só voltam se um modelo usar `{nombre}`
+# ou `exige_setor_saude`.
 STATUS_REVISAR = "revisar antes de enviar"
 
 # Limite real do Excel por célula (.xlsx) -- acima disso o arquivo corrompe a
@@ -158,11 +161,31 @@ LIMITE_CELULA_XLSX = 32767
 _AVISO_TRUNCAMENTO = " [texto do site truncado -- limite de 32.767 caracteres por célula do Excel]"
 
 _COMO_USAR_TEXTO = (
-    ("Lentidão", "Antes de enviar, abra o site no seu celular; se carregar rápido, não envie."),
+    # Bloco de copy, Fase 1 (diretor, 08/10/2026): a conferência no celular vale para
+    # toda mensagem da Nata, não só a de lentidão.
+    (
+        "Antes de enviar (Nata)",
+        "Abra o site no seu próprio celular e confirme o defeito que a mensagem cita (telefone que não "
+        "se pode tocar para ligar, e-mail de modelo, demora para carregar). Se não confirmar, não envie "
+        'e marque "Decidi não enviar".',
+    ),
+    (
+        "Follow-up",
+        '"follow-up 1" e "follow-up 2" (coluna Etapa) são só para quem respondeu. Quem não respondeu à '
+        "primeira mensagem não recebe outra.",
+    ),
+    (
+        "Funil",
+        'Quando o lead avançar, atualize "Resultado" (pediu exemplo, proposta, cliente) e rode o registro '
+        "de abordagens com esta planilha: cada mudança vira uma linha nova, com a data e a hora locais do "
+        "registro (o momento em que você roda o comando, não o da mudança).",
+    ),
     (
         "Profissional detectado",
-        'Quando a coluna "Profissional detectado" = "sim" e você tiver certeza do sobrenome, '
-        'troque "Hola, buenas" por "Hola, Dr./Dra. [Apellido]".',
+        '"Profissional detectado" = "sim" só quando o próprio nome da ficha começa com Dr./Dra. '
+        '(ou Doctor/Doctora). Só nesse caso, e se tiver certeza do sobrenome, troque "Hola, buenas" por '
+        '"Hola, Dr./Dra. [Apellido]". Sem esse tratamento no nome (o comum em abogados e arquitectos), '
+        'mantenha "Hola, buenas".',
     ),
     (
         "Classificar a resposta",
@@ -181,14 +204,15 @@ _COMO_USAR_TEXTO = (
         "Campanha e nicho",
         '"campanha" e "nicho" são a campanha usada quando o lead foi importado -- a escolhida pelo termo '
         'da busca ou, em lista sem termo, a ativa do menu (o nicho da '
-        'campanha, não a categoria do Google). "NAO_VERIFICADO" = lead importado antes da campanha existir.',
+        'campanha, não a categoria do Google). "NAO_VERIFICADO" = lead importado antes da campanha existir. '
+        'O nicho escolhe o texto do lead sem site; nicho sem texto = "REVISAR NICHO", sem mensagem.',
     ),
     (
         "Cidade conferida",
         '"cidade_conferida" é a cidade da busca que gerou a lista, conferida na lista oficial de '
-        'municípios (INE) -- ou a cidade padrão da campanha, em lista sem termo de busca. É a cidade usada para '
-        'limpar o nome do negócio na mensagem. A coluna "cidade" (aba Geral) é outra coisa: a cidade do '
-        'endereço da ficha.',
+        'municípios (INE) -- ou a cidade padrão da campanha, em lista sem termo de busca. Serve para '
+        'separar os resultados por cidade; a mensagem não cita a cidade nem o nome do negócio. A coluna '
+        '"cidade" (aba Geral) é outra coisa: a cidade do endereço da ficha.',
     ),
     (
         "Canal",

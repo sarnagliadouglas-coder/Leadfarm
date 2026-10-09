@@ -14,6 +14,19 @@ e a planilha do diretor nunca foi tocada.
 
 A geração da planilha (`planilha_envio.gerar_planilha`) lê este registro
 (`place_ids_ja_abordados`) e exclui quem já está aqui.
+
+Funil por eventos (decisão do diretor, 08/10/2026): quando um lead JÁ
+registrado aparece na planilha com um "Resultado" diferente do último
+gravado para ele, a mudança vira uma LINHA NOVA (coluna `evento` =
+"resultado", com `registrado_em` = data e hora LOCAIS do registro, não as da
+mudança -- `data_local_do_registro`), em vez de ser só listada como
+divergência. Nenhuma linha antiga é alterada: o registro continua só
+acrescentando, e a primeira linha de cada lead tem `evento` = "envio"
+(vazio nas linhas anteriores a esta regra, que também são envios). A
+sequência de um lead (envio -> pediu exemplo -> proposta -> cliente) é a
+ordem das linhas dele no arquivo: `funil_por_lead` e o comando
+`--funil` a mostram. "Resultado" apagado na planilha não vira evento (não
+é uma mudança de etapa) -- continua listado por `pendencias_registro.py`.
 """
 
 from __future__ import annotations
@@ -71,10 +84,16 @@ COLUNAS_CAMPANHA_REGISTRO = (
     "campanha", "nicho", "pista", "prioridade_rotulo", "prioridade_score", "cidade_conferida",
 )
 
+# Funil por eventos (diretor, 08/10/2026): "evento" no FIM, mesmo padrão --
+# "envio" na primeira linha de um lead, "resultado" em cada mudança de
+# Resultado depois dela. Linha antiga sem a coluna = envio.
+EVENTO_ENVIO = "envio"
+EVENTO_RESULTADO = "resultado"
+
 COLUNAS_REGISTRO = (
     "place_id", "nome", "telefone", "aba_origem", "enviado_em",
     "canal", "modelo", "custo_usd", "registrado_em",
-) + COLUNAS_FUNIL + ("angulo", "variante") + COLUNAS_CAMPANHA_REGISTRO
+) + COLUNAS_FUNIL + ("angulo", "variante") + COLUNAS_CAMPANHA_REGISTRO + ("evento",)
 
 
 class ConfigFunilInvalidaError(Exception):
@@ -251,19 +270,69 @@ def place_ids_registrados(caminho: Path) -> set:
 
 
 def _place_ids_existentes(caminho: Path) -> set:
+    return set(_linhas_por_lead(caminho))
+
+
+def _linhas_por_lead(caminho: Path) -> dict:
+    """`{place_id: [linha, ...]}` do registro, cada linha um dict por nome de
+    coluna, na ordem do arquivo (a ordem em que foram acrescentadas).
+    Arquivo ausente ou sem `place_id` = `{}`. Só leitura."""
     if not Path(caminho).is_file():
-        return set()
-    wb = load_workbook(caminho, read_only=True)
+        return {}
+    wb = load_workbook(caminho, read_only=True, data_only=True)
     try:
-        ws = wb.active
-        linhas = ws.iter_rows(values_only=True)
+        linhas = wb.active.iter_rows(values_only=True)
         cabecalho = next(linhas, None)
         if not cabecalho or "place_id" not in cabecalho:
-            return set()
-        idx = cabecalho.index("place_id")
-        return {linha[idx] for linha in linhas if linha and linha[idx]}
+            return {}
+        por_lead = {}
+        for linha in linhas:
+            dados = dict(zip(cabecalho, linha or ()))
+            if dados.get("place_id"):
+                por_lead.setdefault(dados["place_id"], []).append(dados)
+        return por_lead
     finally:
         wb.close()
+
+
+def _texto(valor) -> str:
+    return "" if valor is None else str(valor).strip()
+
+
+def ultimo_resultado(linhas_do_lead: list) -> str:
+    """O "Resultado" da linha mais recente do lead (a última do arquivo)."""
+    return _texto(linhas_do_lead[-1].get("Resultado")) if linhas_do_lead else ""
+
+
+def funil_por_lead(caminho: Optional[Path] = None) -> dict:
+    """`{place_id: {"nome", "passos": [{"evento", "registrado_em", "enviado_em",
+    "resultado"}, ...]}}` -- a sequência de cada lead, na ordem do registro.
+    Linha sem `evento` (anterior a 08/10/2026) conta como envio. Só leitura."""
+    caminho = Path(caminho) if caminho else caminho_registro()
+    funil = {}
+    for place_id, linhas in _linhas_por_lead(caminho).items():
+        funil[place_id] = {
+            "nome": _texto(linhas[0].get("nome")),
+            "passos": [
+                {
+                    "evento": _texto(linha.get("evento")) or EVENTO_ENVIO,
+                    "registrado_em": _texto(linha.get("registrado_em")),
+                    "enviado_em": _texto(linha.get("enviado_em")),
+                    "resultado": _texto(linha.get("Resultado")),
+                }
+                for linha in linhas
+            ],
+        }
+    return funil
+
+
+def resumo_funil(funil: dict, resultados: tuple) -> dict:
+    """Quantos leads tiveram cada Resultado em ALGUM momento (cada lead conta
+    uma vez por etapa), na ordem de `resultados`."""
+    return {
+        r: sum(1 for lead in funil.values() if any(p["resultado"] == r for p in lead["passos"]))
+        for r in resultados
+    }
 
 
 def _garantir_cabecalho(ws) -> list:
@@ -289,29 +358,56 @@ def _fazer_backup(caminho: Path) -> Optional[Path]:
     return destino
 
 
+def data_local_do_registro(agora: datetime) -> str:
+    """`registrado_em` na data e hora LOCAIS do computador (diretor,
+    09/10/2026: a máquina está em Madri; sem zoneinfo nem dependência nova),
+    sem sufixo de fuso. `agora` com fuso (ex.: UTC) é convertido para o fuso
+    local do sistema (`astimezone()`); sem fuso, já é local. Linhas gravadas
+    antes desta data têm o formato antigo, em UTC com "Z"."""
+    if agora.tzinfo is not None:
+        agora = agora.astimezone()
+    return agora.strftime("%Y-%m-%dT%H:%M:%S")
+
+
 def registrar_envios(
     caminho_planilha: Path, *, diretorio_registro: Optional[Path] = None, agora=None,
     opcoes_funil: Optional[dict] = None,
 ) -> dict:
-    """Devolve `{"acrescentados", "ja_existentes", "backup"}`. Nunca duplica
-    `place_id` (linhas cujo `place_id` já está no registro são só contadas
-    em `ja_existentes`, não gravadas de novo) e NUNCA altera uma linha já
-    existente -- só acrescenta (decisão do diretor, 24/09/2026, quarta
-    rodada: o registro passa a ser a planilha de acompanhamento, o diretor
-    edita diretamente nele). `opcoes_funil` omitido carrega
+    """Devolve `{"acrescentados", "eventos", "ja_existentes", "backup"}`.
+    Um lead novo entra uma vez (`evento` = "envio"); um lead já registrado
+    cujo "Resultado" na planilha está preenchido e difere do último gravado
+    para ele ganha UMA linha nova (`evento` = "resultado") -- contada em
+    `eventos` (funil por eventos, diretor, 08/10/2026). Lead já registrado
+    sem mudança de Resultado só é contado em `ja_existentes`. NUNCA altera
+    uma linha já existente -- só acrescenta (decisão do diretor, 24/09/2026,
+    quarta rodada). `opcoes_funil` omitido carrega
     `config/funil_planilha.json`."""
-    agora = agora or datetime.now(timezone.utc)
+    agora = agora or datetime.now()
     caminho_reg = caminho_registro(diretorio_registro)
     opcoes_funil = opcoes_funil if opcoes_funil is not None else carregar_opcoes_funil()
 
     enviadas = _linhas_enviadas(Path(caminho_planilha))
-    existentes = _place_ids_existentes(caminho_reg)
+    por_lead = _linhas_por_lead(caminho_reg)
 
-    novas = [e for e in enviadas if e["place_id"] and e["place_id"] not in existentes]
-    ja_existentes = len(enviadas) - len(novas)
+    novas, eventos, com_envio, com_evento = [], [], set(), set()
+    for e in enviadas:
+        pid = e["place_id"]
+        if not pid:
+            continue
+        if pid not in por_lead:
+            if pid not in com_envio:  # o mesmo lead novo em duas abas: um envio só, a primeira aba
+                com_envio.add(pid)
+                novas.append({**e, "evento": EVENTO_ENVIO})
+        elif (
+            pid not in com_evento  # o mesmo lead em duas abas gera um evento só
+            and _texto(e["resultado"]) and _texto(e["resultado"]) != ultimo_resultado(por_lead[pid])
+        ):
+            com_evento.add(pid)
+            eventos.append({**e, "evento": EVENTO_RESULTADO})
+    ja_existentes = len(enviadas) - len(novas) - len(eventos)
 
-    if not novas:
-        return {"acrescentados": 0, "ja_existentes": ja_existentes, "backup": None}
+    if not novas and not eventos:
+        return {"acrescentados": 0, "eventos": 0, "ja_existentes": ja_existentes, "backup": None}
 
     backup = _fazer_backup(caminho_reg)
 
@@ -326,8 +422,8 @@ def registrar_envios(
             ws.append(list(COLUNAS_REGISTRO))
 
         cabecalho = _garantir_cabecalho(ws)
-        registrado_em = agora.strftime("%Y-%m-%dT%H:%M:%SZ")
-        for e in novas:
+        registrado_em = data_local_do_registro(agora)
+        for e in novas + eventos:
             valores = {
                 "place_id": e["place_id"], "nome": e["nome"], "telefone": e["telefone"],
                 "aba_origem": e["aba_origem"], "enviado_em": e["enviado_em"], "canal": e["canal"],
@@ -336,6 +432,7 @@ def registrar_envios(
                 "Motivo da edição": e["motivo_edicao"], "Decidi não enviar": e["decidiu_nao_enviar"],
                 "Motivo de não enviar": e["motivo_nao_enviar"], "angulo": e["angulo"], "variante": e["variante"],
                 **{c: e[c] for c in COLUNAS_CAMPANHA_REGISTRO},
+                "evento": e["evento"],
             }
             ws.append([valores.get(c, "") for c in cabecalho])
 
@@ -350,21 +447,61 @@ def registrar_envios(
             f"registro, e a planilha de envio não foi tocada. Feche o arquivo e rode de novo."
         ) from exc
 
-    return {"acrescentados": len(novas), "ja_existentes": ja_existentes, "backup": backup}
+    return {"acrescentados": len(novas), "eventos": len(eventos), "ja_existentes": ja_existentes, "backup": backup}
+
+
+def _data(iso: str) -> str:
+    return iso[:10] if iso else "?"
+
+
+def imprimir_funil(funil: dict, resultados: tuple, place_id: Optional[str] = None) -> int:
+    """Texto do comando `--funil` (só leitura). Devolve o exit code: 0, ou 1
+    se `place_id` foi pedido e não está no registro."""
+    if place_id is not None:
+        if place_id not in funil:
+            print(f"place_id não encontrado no registro: {place_id}")
+            return 1
+        funil = {place_id: funil[place_id]}
+    for pid, lead in funil.items():
+        passos = []
+        for p in lead["passos"]:
+            if p["evento"] == EVENTO_ENVIO:
+                passos.append(f"{_data(p['enviado_em'] or p['registrado_em'])} envio"
+                              + (f" ({p['resultado']})" if p["resultado"] else ""))
+            else:
+                passos.append(f"{_data(p['registrado_em'])} {p['resultado']}")
+        print(f"{lead['nome'] or '(sem nome)'} [{pid}]: " + " -> ".join(passos))
+    if place_id is None:
+        resumo = resumo_funil(funil, resultados)
+        print(f"\nLeads no registro: {len(funil)}")
+        for resultado, n in resumo.items():
+            if n:
+                print(f"  {resultado}: {n}")
+    return 0
 
 
 def main(argv: Optional[list] = None) -> int:
     ap = argparse.ArgumentParser(
-        description="Registra os envios (\"Data 1º contato\" preenchida) de uma planilha de envio já preenchida pelo diretor."
+        description="Registra os envios (\"Data 1º contato\" preenchida) de uma planilha de envio já preenchida pelo "
+                    "diretor, e as mudanças de Resultado como eventos. Com --funil, só lê e mostra o funil por lead."
     )
-    ap.add_argument("planilha", type=Path, help="Caminho da planilha de envio preenchida pelo diretor.")
+    ap.add_argument("planilha", nargs="?", type=Path, help="Caminho da planilha de envio preenchida pelo diretor.")
+    ap.add_argument("--funil", action="store_true", help="Só leitura: mostra a sequência de Resultado de cada lead.")
+    ap.add_argument("--place-id", default=None, help="Com --funil: só este lead.")
     args = ap.parse_args(argv)
+
+    if args.funil:
+        resultados = tuple(carregar_opcoes_funil()["resultado"])
+        return imprimir_funil(funil_por_lead(), resultados, args.place_id)
+    if args.planilha is None:
+        ap.error("informe a planilha (ou use --funil)")
 
     resultado = registrar_envios(args.planilha)
 
     print(
         f"OK: {resultado['acrescentados']} envio(s) registrado(s), "
-        f"{resultado['ja_existentes']} já existente(s) no registro."
+        f"{resultado['eventos']} mudança(s) de Resultado registrada(s) como evento, "
+        f"{resultado['ja_existentes']} já existente(s) sem mudança."
     )
     return 0
 

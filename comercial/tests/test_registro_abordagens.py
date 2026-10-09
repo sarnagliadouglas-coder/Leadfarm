@@ -515,7 +515,7 @@ def test_registro_antigo_ganha_colunas_novas_no_fim_sem_mexer_nas_antigas(tmp_pa
 
     wb = load_workbook(ra.caminho_registro(diretorio))
     cabecalho = [c.value for c in wb.active[1]]
-    assert cabecalho == antigas + ["angulo", "variante"] + list(ra.COLUNAS_CAMPANHA_REGISTRO)
+    assert cabecalho == antigas + ["angulo", "variante"] + list(ra.COLUNAS_CAMPANHA_REGISTRO) + ["evento"]
     linhas = list(wb.active.iter_rows(min_row=2, values_only=True))
     assert list(linhas[0][: len(antigas)]) == [v if v != "" else None for v in linha_antiga]
     nova = dict(zip(cabecalho, linhas[1]))
@@ -533,7 +533,9 @@ def test_colunas_de_campanha_no_fim_do_registro():
     assert ra.COLUNAS_CAMPANHA_REGISTRO == (
         "campanha", "nicho", "pista", "prioridade_rotulo", "prioridade_score", "cidade_conferida",
     )
-    assert ra.COLUNAS_REGISTRO[-6:] == ra.COLUNAS_CAMPANHA_REGISTRO
+    # "evento" no fim desde o funil por eventos (diretor, 08/10/2026), depois das de campanha
+    assert ra.COLUNAS_REGISTRO[-7:-1] == ra.COLUNAS_CAMPANHA_REGISTRO
+    assert ra.COLUNAS_REGISTRO[-1] == "evento"
     assert ra.COLUNAS_REGISTRO[: ra.COLUNAS_REGISTRO.index("variante") + 1][-2:] == ("angulo", "variante")
 
 
@@ -588,11 +590,11 @@ def test_registro_com_cabecalho_de_antes_da_etapa_2_continua_legivel_e_ganha_as_
         cabecalho_extra=["campanha"],
     )
     resultado = ra.registrar_envios(planilha, diretorio_registro=diretorio, opcoes_funil=_OPCOES_FUNIL)
-    assert resultado == {"acrescentados": 1, "ja_existentes": 1, "backup": resultado["backup"]}
+    assert resultado == {"acrescentados": 1, "eventos": 0, "ja_existentes": 1, "backup": resultado["backup"]}
 
     wb = load_workbook(ra.caminho_registro(diretorio))
     cabecalho = [c.value for c in wb.active[1]]
-    assert cabecalho == cabecalho_antigo + list(ra.COLUNAS_CAMPANHA_REGISTRO)
+    assert cabecalho == cabecalho_antigo + list(ra.COLUNAS_CAMPANHA_REGISTRO) + ["evento"]
     linhas = list(wb.active.iter_rows(min_row=2, values_only=True))
     assert list(linhas[0][: len(cabecalho_antigo)]) == [v if v != "" else None for v in linha_antiga]
     assert dict(zip(cabecalho, linhas[1]))["campanha"] == "psico-1"

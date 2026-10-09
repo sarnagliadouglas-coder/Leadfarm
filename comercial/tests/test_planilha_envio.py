@@ -23,7 +23,6 @@ from planilha_envio import (
     COLUNAS_GERAL,
     COLUNAS_NATA,
     LIMITE_CELULA_XLSX,
-    STATUS_REVISAR,
     STATUS_SEM_MENSAGEM,
     LinkInconsistenteError,
     PlaceIdAusenteError,
@@ -34,7 +33,6 @@ from planilha_envio import (
     link_captura,
     montar_contexto_ia_geral,
     montar_contexto_ia_nata,
-    montar_linhas_geral,
     montar_linhas_nata,
     place_ids_ja_abordados,
     profissional_detectado,
@@ -57,7 +55,22 @@ _REGRAS_ANGULO = {
         "multiplicador_concorrente_minimo": 10,
     },
     "lentidao": {"lcp_minimo_ms": 10000, "rodadas_minimas_para_citar_numero": 2},
+    # bloco de copy, Fase 1 (08/10/2026): o texto de sem_site e o ângulo poucas_avaliacoes
+    # dependem do nicho da campanha do lead
+    "nichos_copy": {"psicologos": ["psicolog"], "abogados": ["abogad"], "arquitectos": ["arquitect"]},
 }
+
+
+def montar_linhas_geral(leads_csv, **kwargs):
+    """`planilha_envio.montar_linhas_geral` com as regras de ângulo destes
+    testes quando o caso não passa outras -- como `gerar_planilha`, que
+    sempre as passa. Desde o bloco de copy (08/10/2026) a pista Direta
+    precisa delas para achar o texto do nicho; sem regras, `sem_site` sai
+    REVISAR NICHO (provado em `test_linha_geral_sem_regras_de_nicho_pede_revisao`)."""
+    kwargs.setdefault("regras_angulo", _REGRAS_ANGULO)
+    return pe.montar_linhas_geral(leads_csv, **kwargs)
+
+
 def _m(fato, cta, consequencia=None):
     return {"fato": fato, "consequencia": consequencia, "cta": cta}
 
@@ -73,8 +86,8 @@ _MENSAGENS_ANGULO = {
     "poucas_avaliacoes_1_4_singular": _m("todavía tiene solo {n} {reseñas_palavra}.", "¿le cuento?", "Puede encontrarse con otra."),
     "lentidao": _m("estuve unos {s} segundos esperando.", "¿se lo envío?"),
     "lentidao_sem_numero": _m("estuve bastante rato esperando.", "¿se lo envío?"),
-    "sem_site": _m("vi su ficha de Google, un {nota} con {n} reseñas, enhorabuena.", "¿Le llegan más por Google?"),
-    "sem_site_sem_reputacao": _m("vi su ficha de Google.", "¿Le llegan más por Google?"),
+    "sem_site__psicologos": _m("vi su ficha de Google, un {nota} con {n} reseñas, enhorabuena.", "¿Le llegan más por Google?"),
+    "sem_site_sem_reputacao__psicologos": _m("vi su ficha de Google.", "¿Le llegan más por Google?"),
     "portal": _m("vi su ficha, {nota} con {n} reseñas, y que lleva a {portal}.", "¿Les llegan muchos por {portal}?"),
     "portal_sem_reputacao": _m("vi su ficha y que lleva a {portal}.", "¿Les llegan muchos por {portal}?"),
     "rede_social": _m("vi su ficha, {nota} con {n} reseñas, y que lleva a su perfil de {rede}.", "¿Les escriben por {rede}?"),
@@ -84,6 +97,12 @@ _MENSAGENS_ANGULO = {
     "nomes_portal": {"doctoralia.es": "Doctoralia"},
     "nomes_rede": {"instagram.com": "Instagram"},
     "nomes_construtor": {"wordpress.com": "WordPress"},
+    # 09/10/2026: domínio fora do mapa vira termo genérico, nunca o domínio
+    "termos_genericos": {
+        "portal": {"nome": "una plataforma externa", "referencia": "esa plataforma"},
+        "rede": {"nome": "una red social", "referencia": "esa red social"},
+        "constructor": {"nome": "una plataforma externa", "referencia": "esa plataforma"},
+    },
 }
 # Apresentação vazia por padrão: os testes de linha olham o corpo, não a
 # abertura (a abertura A/B foi aposentada em 29/09/2026, D12 Fase 5.1).
@@ -112,6 +131,7 @@ def _linha_csv(**over):
         "classe_site": "sem_site", "avaliacoes": "27", "nota": "4.8",
         "google_maps_url": "https://maps.google.com/?cid=1", "place_id": "p1",
         "campanha_cidade": "Alicante",  # coluna 20, contrato 2.3.0
+        "campanha_nicho": "Psicólogos",  # coluna 16, contrato 2.2.0 -- escolhe o texto de sem_site
     }
     base.update(over)
     return base
@@ -679,7 +699,8 @@ def test_linha_geral_palavras_genericas_usam_a_cidade_do_lead(tmp_path, cidade, 
     20 do CSV humano e é barrado com Alicante (controle)."""
     kwargs = _kwargs_comuns(tmp_path)
     kwargs["mensagens_angulo"] = {
-        **_MENSAGENS_ANGULO, "sem_site_sem_reputacao": _m("vi su ficha de Google en Elche.", "¿Le llegan más por Google?"),
+        **_MENSAGENS_ANGULO,
+        "sem_site_sem_reputacao__psicologos": _m("vi su ficha de Google en Elche.", "¿Le llegan más por Google?"),
     }
     linha = montar_linhas_geral([_linha_csv(nome="Elche", nota="", avaliacoes="", campanha_cidade=cidade)], **kwargs)[0]
     assert linha["Ângulo"] == "sem_site"
@@ -797,7 +818,8 @@ def test_gerar_planilha_grava_geral_nata_e_como_usar_e_nunca_sobrescreve(tmp_pat
     assert wb["Geral"].cell(row=1, column=1).font.bold is True
     assert wb["Geral"].freeze_panes == "A2"
     assert wb["Nata"].cell(row=2, column=2).value == "Clínica Ejemplo"  # coluna 2 = "nome"
-    assert wb["Como usar"].cell(row=2, column=1).value == "Lentidão"
+    # era "Lentidão" até 08/10/2026: a conferência no celular passou a valer para toda a Nata
+    assert wb["Como usar"].cell(row=2, column=1).value == "Antes de enviar (Nata)"
 
     with pytest.raises(PlanilhaJaExisteError):
         gerar_planilha(
@@ -1337,60 +1359,77 @@ def _kwargs_reais(diretorio_capturas):
     return kw
 
 
-def test_linha_nata_nome_inseguro_fica_sem_mensagem_e_marcada_para_revisar(tmp_path):
+def test_linha_nata_nome_inseguro_nao_segura_mais_a_mensagem(tmp_path):
+    """Segunda rodada da Fase 1 (diretor, 08/10/2026): o nome do negócio saiu
+    de todos os modelos ("su web"). Um nome que não limpa com segurança deixou
+    de deixar a linha em REVISAR NOME (era o caso até esta rodada)."""
     lead = _lead_nata(nome="Clínica Dental Ficticia 🦷 Su Sonrisa", nicho="Clínica dental", lcp_ms=12000,
                       psi_estado="CONFIRMADO_PRESENTE", rodadas=2)
     linha = montar_linhas_nata(
         [lead], [], [], regras_angulo=am.carregar_regras_angulo(), **_kwargs_reais(tmp_path),
     )[0]
     assert linha["Ângulo"] == "lentidao"
-    assert linha["mensagem"] == ""
-    assert linha["Status"] == STATUS_REVISAR
-    assert "REVISAR NOME" in linha["Aviso"]
-    assert "Benal" not in linha["WhatsApp"]  # sem mensagem no link
-
-
-def test_linha_nata_nome_limpo_sai_com_mensagem_nova(tmp_path):
-    lead = _lead_nata(nome="Dental Brisa - Clínica Dental en Alicante", nicho="Clínica dental", lcp_ms=12000,
-                      psi_estado="CONFIRMADO_PRESENTE", rodadas=2)
-    linha = montar_linhas_nata(
-        [lead], [], [], regras_angulo=am.carregar_regras_angulo(), **_kwargs_reais(tmp_path),
-    )[0]
-    assert "Abrí la web de Dental Brisa desde el móvil" in linha["mensagem"]
+    assert linha["mensagem"].startswith("Hola, buenas. Soy Douglas, diseño webs. He probado su web")
+    assert "Ficticia" not in linha["mensagem"]
     assert linha["Status"] == ""
     assert "REVISAR" not in linha["Aviso"]
 
 
-@pytest.mark.parametrize("cidade,nome_na_mensagem", [
-    ("Elche", "Abrí la web de Dental Brisa desde"),             # cidade do lead Elche: corta
-    ("Alicante", "Abrí la web de Dental Brisa Elche desde"),    # controle: cidade do lead Alicante
-])
-def test_linha_nata_cidade_do_nome_curto_vem_do_lead(tmp_path, cidade, nome_na_mensagem):
-    """Contrato 2.3.0 (multicidade): a cidade cortada do fim do nome é a `campanha_cidade`
-    carimbada no lead."""
+@pytest.mark.parametrize("cidade", [("Elche", "CONFIRMADO_PRESENTE"), ("Alicante", "CONFIRMADO_PRESENTE"),
+                                    (None, "NAO_VERIFICADO")])
+def test_linha_nata_cidade_do_lead_nao_muda_mais_a_mensagem(tmp_path, cidade):
+    """Contrato 2.3.0 (multicidade): a cidade só servia para limpar o nome. Sem
+    o nome na mensagem, a mesma mensagem sai com qualquer cidade -- inclusive
+    sem cidade, que antes era REVISAR NOME."""
     lead = _lead_nata(nome="Dental Brisa Elche", nicho="Clínica dental", lcp_ms=12000,
-                      psi_estado="CONFIRMADO_PRESENTE", rodadas=2,
-                      campanha_cidade=(cidade, "CONFIRMADO_PRESENTE"))
+                      psi_estado="CONFIRMADO_PRESENTE", rodadas=2, campanha_cidade=cidade)
     linha = montar_linhas_nata(
         [lead], [], [], regras_angulo=am.carregar_regras_angulo(), **_kwargs_reais(tmp_path),
     )[0]
-    assert nome_na_mensagem in linha["mensagem"]
+    assert "He probado su web con el test de velocidad de Google" in linha["mensagem"]
+    assert "Brisa" not in linha["mensagem"]
+    assert "REVISAR" not in linha["Aviso"]
 
 
-def test_linha_geral_sem_site_fora_da_saude_fica_sem_mensagem_e_marcada(tmp_path):
+def test_linha_geral_sem_site_fora_da_saude_sai_pelo_nicho_da_campanha(tmp_path):
+    """Bloco de copy, Fase 1 (diretor, 08/10/2026): `sem_site` não exige mais
+    saúde -- antes, este lead saía REVISAR SETOR. O texto é o do nicho da
+    campanha (abogados), sem "pacientes"."""
     linha = montar_linhas_geral(
-        [_linha_csv(nome="Constructora Sol")], regras_angulo=am.carregar_regras_angulo(), **_kwargs_reais(tmp_path),
+        [_linha_csv(nome="Bufete Ficticio Alameda", campanha_nicho="Abogados")],
+        regras_angulo=am.carregar_regras_angulo(), **_kwargs_reais(tmp_path),
+    )[0]
+    assert linha["Ângulo"] == "sem_site"
+    assert "sus especialidades" in linha["Mensagem sugerida"]
+    assert "pacientes" not in linha["Mensagem sugerida"]
+    assert "REVISAR" not in linha["Aviso"]
+
+
+@pytest.mark.parametrize("campanha_nicho", ["Fontaneros", "NAO_VERIFICADO", ""])
+def test_linha_geral_sem_site_de_nicho_nao_reconhecido_fica_sem_mensagem_e_marcada(tmp_path, campanha_nicho):
+    """Controle negativo: nicho fora de `nichos_copy` (ou não carimbado) não
+    ganha texto adivinhado."""
+    linha = montar_linhas_geral(
+        [_linha_csv(campanha_nicho=campanha_nicho)], regras_angulo=am.carregar_regras_angulo(), **_kwargs_reais(tmp_path),
     )[0]
     assert linha["Ângulo"] == "sem_site"
     assert linha["Mensagem sugerida"] == ""
-    assert "REVISAR SETOR" in linha["Aviso"]
+    assert "REVISAR NICHO" in linha["Aviso"]
 
 
-def test_linha_geral_sem_site_saude_sai_com_mensagem_nova(tmp_path):
+def test_linha_geral_sem_regras_de_nicho_pede_revisao(tmp_path):
+    """Sem `nichos_copy` nas regras (chamada sem regras), nenhum texto de
+    `sem_site` é escolhido -- a linha pede revisão, nunca cai num nicho."""
+    linha = pe.montar_linhas_geral([_linha_csv()], regras_angulo={}, **_kwargs_comuns(tmp_path))[0]
+    assert linha["Mensagem sugerida"] == ""
+    assert "REVISAR NICHO" in linha["Aviso"]
+
+
+def test_linha_geral_sem_site_psicologos_sai_com_mensagem_nova(tmp_path):
     linha = montar_linhas_geral(
         [_linha_csv(nome="Clínica dental Sol")], regras_angulo=am.carregar_regras_angulo(), **_kwargs_reais(tmp_path),
     )[0]
-    assert "se nota que sus pacientes están contentos" in linha["Mensagem sugerida"]
+    assert "desde qué orientación trabaja" in linha["Mensagem sugerida"]
     assert "REVISAR" not in linha["Aviso"]
 
 
@@ -1492,13 +1531,17 @@ def test_linha_geral_prioridade_vazia_da_onda_2_fica_vazia():
 
 
 def test_linha_geral_csv_antigo_sem_colunas_novas_nao_inventa(tmp_path):
-    """CSV humano anterior à 2.2.0 (14 colunas): NAO_VERIFICADO / vazio, nunca um valor inventado."""
-    linha = montar_linhas_geral([_linha_csv(nicho="Psicólogo")], **_kwargs_comuns(tmp_path))[0]
+    """CSV humano anterior à 2.2.0 (14 colunas): NAO_VERIFICADO / vazio, nunca um valor inventado.
+    Desde o bloco de copy (08/10/2026), sem `campanha_nicho` o texto de `sem_site` não é
+    escolhido: o único aviso é o REVISAR NICHO -- o nicho não é deduzido da categoria do Google."""
+    antiga = {k: v for k, v in _linha_csv(nicho="Psicólogo").items() if k != "campanha_nicho"}
+    linha = montar_linhas_geral([antiga], **_kwargs_comuns(tmp_path))[0]
     assert linha["campanha"] == pe.NAO_VERIFICADO
     assert linha["nicho"] == pe.NAO_VERIFICADO
     assert linha["prioridade_rotulo"] == ""
     assert linha["prioridade_score"] == ""
-    assert linha["Aviso"] == ""
+    assert linha["Aviso"].startswith("REVISAR NICHO") and ";" not in linha["Aviso"]
+    assert linha["Mensagem sugerida"] == ""
 
 
 def test_linha_geral_possivel_mesmo_negocio_vai_para_o_aviso_com_o_place_id(tmp_path):
@@ -1522,11 +1565,12 @@ def test_aviso_possivel_mesmo_negocio_lista_varios_place_ids():
 def test_aviso_mesmo_negocio_soma_com_o_aviso_de_revisao(tmp_path):
     """O aviso do par não apaga o motivo de revisão da mensagem (e vice-versa)."""
     linha = montar_linhas_geral(
-        [_linha_csv_22(possivel_mesmo_negocio="pX", nome="Constructora Sol", nicho="Constructora")],
+        [_linha_csv_22(possivel_mesmo_negocio="pX", nome="Constructora Sol", nicho="Constructora",
+                       campanha_nicho="Constructoras")],
         regras_angulo=am.carregar_regras_angulo(), **_kwargs_reais(tmp_path),
     )[0]
     assert "pX" in linha["Aviso"]
-    assert "REVISAR SETOR" in linha["Aviso"]
+    assert "REVISAR NICHO" in linha["Aviso"]  # era REVISAR SETOR antes de 08/10/2026
 
 
 def _linha_nata_de(lead, tmp_path, pista_candidato=False):
@@ -1584,7 +1628,11 @@ def test_linha_nata_sem_par_nao_gera_aviso(tmp_path):
     assert "mesmo negócio" not in _linha_nata_de(_lead_nata(), tmp_path)["Aviso"]
 
 
-def test_linha_nata_aviso_do_par_soma_com_revisar_nome(tmp_path):
+def test_linha_nata_aviso_do_par_nao_bloqueia_a_mensagem(tmp_path):
+    """O aviso do par é aviso, não julgamento. Até 08/10/2026 este caso provava
+    que ele somava com o REVISAR NOME do nome inseguro; sem o nome nos textos,
+    não há mais REVISAR NOME na Nata, e a soma com o REVISAR da Geral segue em
+    `test_aviso_mesmo_negocio_soma_com_o_aviso_de_revisao`."""
     lead = _lead_nata(
         nome="Clínica Dental Ficticia 🦷 Su Sonrisa", nicho="Clínica dental", lcp_ms=12000,
         psi_estado="CONFIRMADO_PRESENTE",
@@ -1594,13 +1642,29 @@ def test_linha_nata_aviso_do_par_soma_com_revisar_nome(tmp_path):
         [lead], [], [], regras_angulo=am.carregar_regras_angulo(), **_kwargs_reais(tmp_path),
     )[0]
     assert "pY por dominio" in linha["Aviso"]
-    assert "REVISAR NOME" in linha["Aviso"]
+    assert linha["mensagem"] != ""
 
 
 def test_como_usar_avisa_que_a_prioridade_nao_e_autoritativa():
     textos = dict(pe._COMO_USAR_TEXTO)
     assert "NÃO são autoritativas" in textos["Prioridade"]
     assert "WhatsApp" in textos["Canal"]
+
+
+def test_como_usar_traz_a_conferencia_da_nata_o_follow_up_e_o_funil():
+    """Bloco de copy, Fase 1 (diretor, 08/10/2026)."""
+    textos = dict(pe._COMO_USAR_TEXTO)
+    assert "próprio celular" in textos["Antes de enviar (Nata)"]
+    assert "Decidi não enviar" in textos["Antes de enviar (Nata)"]
+    assert "só para quem respondeu" in textos["Follow-up"]
+    assert "linha nova" in textos["Funil"]
+    # 09/10/2026: a data do evento é a local do registro (C4) e a dica Dr./Dra. só vale com o tratamento (C3)
+    assert "locais do registro" in textos["Funil"]
+    assert "só quando o próprio nome da ficha começa com Dr./Dra." in textos["Profissional detectado"]
+    assert "Lentidão" not in textos  # substituída pela conferência de toda a Nata
+    # segunda rodada (08/10/2026): a cidade não limpa mais o nome (a mensagem não o cita)
+    assert "limpar o nome" not in textos["Cidade conferida"]
+    assert "REVISAR NICHO" in textos["Campanha e nicho"]
 
 
 def test_gerar_planilha_so_whatsapp_nenhum_mailto_e_campanha_no_fim(tmp_path, monkeypatch):

@@ -200,8 +200,9 @@ def test_lead_fora_da_categoria_nao_chega_a_nenhuma_onda(tmp_path, monkeypatch, 
 # real em EQC/config/ não foi alterado nesta rodada (edição negada pelo ambiente).
 RAIZES = {
     # "terapeut" (psicólogos) e "asistencia jurídica" (abogados): diretor, 07/10/2026.
+    # "gestor" saiu de abogados em 08/10/2026 (diretor): gestorías não recebem o texto de despacho.
     "psicologos": ["psicólog", "psicoterapeut", "salud mental", "terapeut"],
-    "abogados": ["abogad", "servicios legales", "bufete", "gestor", "asistencia jurídica"],
+    "abogados": ["abogad", "servicios legales", "bufete", "asistencia jurídica"],
     "arquitectos": ["arquitect"],
 }
 # "fisioterapeut" excluído em psicólogos (diretor, 07/10/2026): "Fisioterapeuta" contém "terapeut".
@@ -232,7 +233,7 @@ def test_sem_a_exclusao_fisioterapeuta_passaria_como_psicologo():
 @pytest.mark.parametrize("nicho,categoria", [
     ("psicologos", "Psicóloga"), ("psicologos", "Psicólogo infantil"), ("psicologos", "Psicoterapeuta"),
     ("psicologos", "Terapeuta"),
-    ("abogados", "Abogada"), ("abogados", "Abogado"), ("abogados", "Gestoría"),
+    ("abogados", "Abogada"), ("abogados", "Abogado"),
     ("abogados", "Proveedor de servicios de asistencia jurídica"),
     ("abogados", "PROVEEDOR DE SERVICIOS DE ASISTENCIA JURIDICA"),
     ("arquitectos", "Arquitecta"), ("arquitectos", "Arquitecto técnico"), ("arquitectos", "Estudio de arquitectura"),
@@ -245,6 +246,7 @@ def test_raiz_casa_feminino_e_variantes(nicho, categoria):
     ("psicologos", "Dentista"), ("psicologos", "Abogada"), ("psicologos", "Psiquiatra"),
     ("psicologos", "Centro de terapia"),  # "terapeut" não casa com "terapia" (limite registrado, 07/10/2026)
     ("abogados", "Arquitecta"), ("abogados", "Psicóloga"),
+    ("abogados", "Gestoría"), ("abogados", "Gestor administrativo"),  # sem "gestor" desde 08/10/2026
     ("arquitectos", "Abogado"), ("arquitectos", "Diseñador de interiores"),
 ])
 def test_raiz_fora_da_campanha_continua_cortada(nicho, categoria):

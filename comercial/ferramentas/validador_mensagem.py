@@ -64,6 +64,14 @@ Treze checagens (1-12 do desenho aprovado em 23/09; 13 da mudança 2, 27/09/2026
     Checagem opcional pela ausência da chave `afirmacao`, mesmo princípio
     das checagens 8 e 9.
 
+14. `mensagem_1` sem nenhum domínio ou endereço (`padrao_dominio` da
+    config: "palavra.palavra" com sufixo, subdomínios, e-mails, linktr.ee...),
+    mesmo sem "http"/"www" -- o WhatsApp o transforma em link e um subdomínio
+    pode trazer o nome do negócio (decisão do diretor, 09/10/2026). Única
+    exceção: o e-mail de modelo citado pelo `defeito_visivel`, que chega em
+    `entrada["texto_encontrado"]`. Checagem opcional pela ausência da chave,
+    mesmo princípio das checagens 8 e 9.
+
 Exceções por modelo (decisão do diretor, 01/10/2026, "Novos templates e
 ângulos"): `validar_mensagem(..., excecoes=...)` dispensa, SÓ para o modelo
 que as declara em `config/mensagens_angulo.json` (`excecoes_validacao`), a
@@ -330,6 +338,19 @@ def validar_mensagem(
 
     if re.search(r"https?://|www\.", mensagem, re.IGNORECASE):
         motivos.append("mensagem_1 contém URL")
+
+    padrao_dominio = config.get("padrao_dominio")
+    if padrao_dominio:
+        # checagem 14: nenhum domínio nem endereço, nem sem "http"/"www" -- a
+        # única exceção é o e-mail de modelo que o `defeito_visivel` cita
+        # (`entrada["texto_encontrado"]`), que é a própria evidência
+        sem_permitidos = mensagem
+        permitido = entrada.get("texto_encontrado")
+        if isinstance(permitido, str) and permitido:
+            sem_permitidos = sem_permitidos.replace(permitido, " ")
+        dominios = re.findall(padrao_dominio, sem_permitidos, re.IGNORECASE)
+        if dominios:
+            motivos.append(f"mensagem_1 contém domínio ou endereço: {dominios}")
 
     achados_moeda = [s for s in config["simbolos_moeda"] if s in mensagem]
     if achados_moeda:

@@ -67,6 +67,23 @@ negócio) e declaram em `excecoes_validacao` quais checagens do validador
 dispensam -- só eles. Quando o nome não limpa com segurança, ou o setor não é
 saúde num modelo que fala de "paciente" (`exige_setor_saude`), o lead não
 recebe mensagem pronta: `LinhaPedeRevisaoError` e o operador revisa.
+
+Bloco de copy, Fase 1 (decisão do diretor, 08/10/2026) -- substitui a ordem
+acima: `defeito_visivel` (e-mail de modelo) -> `contato` -> `lentidao` (LCP >=
+10 s) -> `poucas_avaliacoes` -> `sem_angulo`; `lentidao_moderada` só com
+`ativo` na config (hoje desligada). `poucas_avaliacoes` não é escolhido para
+nicho de `nichos_excluidos` (psicólogos) nem para lead cujo nicho de copy não
+se reconhece (`nicho_copy_do_lead`). Na Direta, `sem_site` usa o par de
+modelos do nicho da campanha (`sem_site__<nicho>`); nicho não reconhecido =
+`LinhaPedeRevisaoError` (REVISAR NICHO). A apresentação vem logo depois da
+saudação, igual em todos os modelos.
+
+Segunda rodada da Fase 1 (diretor, 08/10/2026): ordem ATIVA da Nata
+`defeito_visivel` -> `contato` -> `lentidao` com número; `poucas_avaliacoes`
+(`ativo`) e o texto sem número da lentidão (`lentidao.sem_numero_ativo`)
+desligados pela config. Nenhum modelo da config usa mais `{nombre}` ("su web",
+"su ficha"): `nome_curto_seguro` só roda para um modelo que o use, então lead
+sem `campanha_cidade` deixa de sair REVISAR NOME.
 """
 
 from __future__ import annotations
@@ -95,12 +112,21 @@ CAMINHO_MENSAGENS_PADRAO = _CONFIG_DIR / "mensagens_angulo.json"
 CAMINHO_ABERTURAS_PADRAO = _CONFIG_DIR / "remetente_apresentacao.json"
 
 _CHAVES_REGRAS_OBRIGATORIAS = ("poucas_avaliacoes", "lentidao")
+
+# Nichos de copy com texto próprio na Direta (bloco de copy, Fase 1, diretor,
+# 08/10/2026). Cada um precisa de uma entrada em `nichos_copy`
+# (config/angulo_regras.json) e em `vocabulario_nicho` (mensagens_angulo.json).
+NICHOS_COPY = ("psicologos", "abogados", "arquitectos")
+MODELOS_SEM_SITE = tuple(
+    f"{base}__{nicho}" for nicho in NICHOS_COPY for base in ("sem_site", "sem_site_sem_reputacao")
+)
+
 MODELOS = (
     "contato",
     "poucas_avaliacoes_5_30", "poucas_avaliacoes_5_30_singular",
     "poucas_avaliacoes_1_4", "poucas_avaliacoes_1_4_singular",
     "lentidao", "lentidao_sem_numero", "lentidao_moderada", "defeito_visivel",
-    "sem_site", "sem_site_sem_reputacao",
+    *MODELOS_SEM_SITE,
     "portal", "portal_sem_reputacao",
     "rede_social", "rede_social_sem_reputacao",
     "construtor", "construtor_sem_reputacao",
@@ -108,17 +134,11 @@ MODELOS = (
 
 _CHAVES_MENSAGENS_OBRIGATORIAS = (
     "saudacao",
-    "contato",
-    "poucas_avaliacoes_5_30", "poucas_avaliacoes_5_30_singular",
-    "poucas_avaliacoes_1_4", "poucas_avaliacoes_1_4_singular",
-    "lentidao", "lentidao_sem_numero", "lentidao_moderada", "defeito_visivel",
-    "sem_site", "sem_site_sem_reputacao",
-    "portal", "portal_sem_reputacao", "nomes_portal",
-    "rede_social", "rede_social_sem_reputacao", "nomes_rede",
-    "construtor", "construtor_sem_reputacao", "nomes_construtor",
+    *MODELOS,
+    "vocabulario_nicho", "termos_genericos", "nomes_portal", "nomes_rede", "nomes_construtor",
 )
 
-ANGULOS_NATA = ("contato", "poucas_avaliacoes", "defeito_visivel", "lentidao", "lentidao_moderada")
+ANGULOS_NATA = ("defeito_visivel", "contato", "lentidao", "poucas_avaliacoes", "lentidao_moderada")
 SEM_ANGULO = "sem_angulo"
 
 # --- tipo de CTA por ângulo (D12 Fase 5, decisão do diretor, 29/09/2026) ----
@@ -129,13 +149,17 @@ SEM_ANGULO = "sem_angulo"
 # "diagnostico" e "confirmacion" são os mesmos tipos de CTA definidos na
 # Fase 3. `construtor` fica "confirmacion" -- NÃO recebe Revisión breve
 # neste rollout (sem captura automática, classe_site != "proprio").
+#
+# Bloco de copy, Fase 1 (diretor, 08/10/2026): na Nata o fecho passa a ser a
+# captura ("¿Le paso una captura…?"), e na Direta sem site, o exemplo pronto
+# ("¿Le preparo un ejemplo…?") -- a Revisión breve saiu dos textos.
 CTA_TIPO_POR_ANGULO = {
-    "contato": "revision",
-    "lentidao": "revision",
+    "contato": "captura",
+    "lentidao": "captura",
     "lentidao_moderada": "revision",
-    "defeito_visivel": "revision",
+    "defeito_visivel": "captura",
     "poucas_avaliacoes": "diagnostico",
-    "sem_site": "diagnostico",
+    "sem_site": "ejemplo",
     "portal": "diagnostico",
     "rede_social": "diagnostico",
     "construtor": "confirmacion",
@@ -285,7 +309,14 @@ def cidade_do_lead(lead) -> Optional[str]:
     ativa e o `config/cidade_da_busca.json` (aposentado em 04/10/2026).
     Ausente, vazia ou `NAO_VERIFICADO` = `None`: nunca uma cidade adivinhada
     (`nome_curto_seguro` marca a linha para revisão)."""
-    campo = lead.get("campanha_cidade") if hasattr(lead, "get") else None
+    return _texto_do_carimbo(lead, "campanha_cidade")
+
+
+def _texto_do_carimbo(lead, chave: str) -> Optional[str]:
+    """Texto de um carimbo de campanha do lead (`campanha_cidade`,
+    `campanha_nicho`): `CampoEvidencia` no lead do contrato, texto na linha do
+    CSV humano. Ausente, vazio ou `NAO_VERIFICADO` = `None`."""
+    campo = lead.get(chave) if hasattr(lead, "get") else None
     if campo is None:
         return None
     if hasattr(campo, "presente"):
@@ -295,6 +326,25 @@ def cidade_do_lead(lead) -> Optional[str]:
         return texto or None
     texto = str(campo).strip()
     return None if not texto or texto == _NAO_VERIFICADO else texto
+
+
+def nicho_copy_do_lead(lead, regras: dict) -> Optional[str]:
+    """Nicho de copy do lead (chave de `regras["nichos_copy"]`, ex.
+    "abogados"), pelo `campanha_nicho` carimbado no import -- nunca pela
+    categoria do Google. Os radicais de cada nicho são procurados no rótulo
+    sem acento e sem maiúscula. Rótulo ausente, nenhum nicho ou mais de um
+    nicho casando = `None`: quem depende do nicho não adivinha (bloco de copy,
+    Fase 1, diretor, 08/10/2026)."""
+    rotulo = _texto_do_carimbo(lead, "campanha_nicho")
+    if not rotulo:
+        return None
+    normalizado = _sem_acentos(rotulo).lower()
+    nichos = regras.get("nichos_copy") or {}
+    achados = [
+        nicho for nicho, radicais in nichos.items()
+        if not nicho.startswith("_") and any(_sem_acentos(r).lower() in normalizado for r in radicais)
+    ]
+    return achados[0] if len(achados) == 1 else None
 
 
 # --- preenchimento de placeholders ------------------------------------------
@@ -368,21 +418,36 @@ def _hostname(site_url: Optional[str]) -> Optional[str]:
     return host or None
 
 
-def _nome_por_dominio(site_url: Optional[str], mapa_nomes: dict) -> str:
+def _nome_por_dominio(site_url: Optional[str], mapa_nomes: dict) -> Optional[str]:
     """Nome legível a partir do domínio do site (`mapa_nomes` da config --
     `nomes_portal` para `portal`, `nomes_rede` para `rede_social`; ex.:
     `doctoralia.es` -> `Doctoralia`, `instagram.com` -> `Instagram`).
-    Domínio desconhecido ou ausente: o próprio domínio, sem "www." (nunca
-    inventa um nome bonito)."""
+    Domínio desconhecido ou ausente: `None` -- o domínio nunca entra na
+    mensagem (diretor, 09/10/2026: sairia como link e podia trazer o nome do
+    negócio); quem chama usa o termo genérico (`_plataforma_da_mensagem`)."""
     host = _hostname(site_url)
     if not host:
-        return ""
+        return None
     if host in mapa_nomes:
         return mapa_nomes[host]
     for dominio, nome in mapa_nomes.items():
         if host.endswith("." + dominio):
             return nome
-    return host
+    return None
+
+
+def _plataforma_da_mensagem(site_url: Optional[str], mapa_nomes: dict, mensagens: dict, tipo: str) -> tuple:
+    """`(nome, referencia)` para a frase da mensagem: o nome legível do mapa
+    (as duas formas iguais, ex. "Doctoralia") ou, para domínio fora do mapa,
+    o termo genérico de `termos_genericos[tipo]` em mensagens_angulo.json
+    (ex. "una plataforma externa" / "esa plataforma")."""
+    nome = _nome_por_dominio(site_url, mapa_nomes)
+    if nome:
+        return nome, nome
+    genericos = (mensagens.get("termos_genericos") or {}).get(tipo)
+    if not genericos:
+        raise ValueError(f"domínio fora de nomes_* e sem termos_genericos[{tipo!r}] na config de mensagens")
+    return genericos["nome"], genericos["referencia"]
 
 
 # --- ângulo "contato" --------------------------------------------------------
@@ -440,6 +505,28 @@ def _concorrentes_qualificados(lead, leads_do_lote: list, multiplicador: float) 
         if nicho_outro == nicho_proprio and avaliacoes_outro is not None and avaliacoes_outro >= limiar:
             qualificados.append(avaliacoes_outro)
     return qualificados
+
+
+def _vocabulario_do_nicho(lead, regras: dict, mensagens: dict) -> dict:
+    """`{negocio, negocios}` do nicho de copy do lead (`vocabulario_nicho` de
+    mensagens_angulo.json). Modelos que não usam essas palavras não precisam
+    delas; se algum modelo de `poucas_avaliacoes` as usa e o nicho não tem
+    vocabulário, a linha pede revisão -- nunca uma palavra adivinhada."""
+    nicho = nicho_copy_do_lead(lead, regras)
+    vocabulario = (mensagens.get("vocabulario_nicho") or {}).get(nicho) if nicho else None
+    if vocabulario:
+        return {"negocio": vocabulario["negocio"], "negocios": vocabulario["negocios"]}
+    usa = any(
+        "{negocio" in ((mensagens.get(chave) or {}).get(bloco) or "")
+        for chave in MODELOS if chave.startswith("poucas_avaliacoes")
+        for bloco in ("fato", "consequencia", "cta")
+    )
+    if usa:
+        raise LinhaPedeRevisaoError(
+            f"REVISAR NICHO antes de enviar: o nicho da campanha do lead ({nicho or 'não reconhecido'}) "
+            "não tem vocabulário em vocabulario_nicho"
+        )
+    return {}
 
 
 def _elegivel_para_poucas_avaliacoes(nota, avaliacoes, regras_poucas_avaliacoes: dict) -> bool:
@@ -652,6 +739,8 @@ def escolher_angulo_nata(lead, leads_do_lote: list, regras: dict) -> str:
     concorrente do ângulo `poucas_avaliacoes` (nata + candidatos_triagem +
     descartados) -- inclui o próprio `lead`, que é excluído por `place_id`
     dentro de `_concorrentes_qualificados`."""
+    # Ordem do bloco de copy, Fase 1 (diretor, 08/10/2026): e-mail de modelo
+    # (defeito_visivel) -> contato -> lentidao -> poucas_avaliacoes.
     # defeito_visivel: prioridade total, antes de todos (diretor, 01/10/2026)
     if _texto_encontrado_defeito(lead, regras) is not None:
         return "defeito_visivel"
@@ -659,28 +748,49 @@ def escolher_angulo_nata(lead, leads_do_lote: list, regras: dict) -> str:
     if _telefone_na_pagina_e_texto(lead):
         return "contato"
 
-    regras_poucas_avaliacoes = regras["poucas_avaliacoes"]
-    confirmadas = _nota_e_avaliacoes_confirmadas(lead)
-    if confirmadas is not None:
-        nota, avaliacoes = confirmadas
-        if _elegivel_para_poucas_avaliacoes(nota, avaliacoes, regras_poucas_avaliacoes):
-            if _concorrentes_qualificados(lead, leads_do_lote, regras_poucas_avaliacoes["multiplicador_concorrente_minimo"]):
-                return "poucas_avaliacoes"
-
     lcp_ms = _lcp_ms_confirmado(lead)
     if lcp_ms is not None and lcp_ms >= regras["lentidao"]["lcp_minimo_ms"]:
-        return "lentidao"
+        # sem medição repetida, o texto seria o sem número -- desligado por
+        # `lentidao.sem_numero_ativo` (diretor, 08/10/2026): o lead segue
+        # para os ângulos seguintes, sem lentidão
+        if regras["lentidao"].get("sem_numero_ativo", True) or _medicao_consistente_para_citar_numero(
+            lead, regras["lentidao"]["rodadas_minimas_para_citar_numero"]
+        ):
+            return "lentidao"
 
     moderada = regras.get("lentidao_moderada")
     if (
-        moderada and lcp_ms is not None and lcp_ms >= moderada["lcp_minimo_ms"]
+        moderada and moderada.get("ativo", True)
+        and lcp_ms is not None and lcp_ms >= moderada["lcp_minimo_ms"]
         # o texto aprovado cita os segundos e não tem variante sem número:
         # só sai com medição consistente (mesma regra de `lentidao`)
         and _medicao_consistente_para_citar_numero(lead, regras["lentidao"]["rodadas_minimas_para_citar_numero"])
     ):
         return "lentidao_moderada"
 
+    if _nicho_aceita_poucas_avaliacoes(lead, regras):
+        regras_poucas_avaliacoes = regras["poucas_avaliacoes"]
+        confirmadas = _nota_e_avaliacoes_confirmadas(lead)
+        if confirmadas is not None:
+            nota, avaliacoes = confirmadas
+            if _elegivel_para_poucas_avaliacoes(nota, avaliacoes, regras_poucas_avaliacoes):
+                if _concorrentes_qualificados(lead, leads_do_lote, regras_poucas_avaliacoes["multiplicador_concorrente_minimo"]):
+                    return "poucas_avaliacoes"
+
     return SEM_ANGULO
+
+
+def _nicho_aceita_poucas_avaliacoes(lead, regras: dict) -> bool:
+    """`poucas_avaliacoes` só para nicho de copy reconhecido e fora de
+    `poucas_avaliacoes.nichos_excluidos` (diretor, 08/10/2026: nunca na
+    campanha de psicólogos -- pedir avaliação pública a paciente). Nicho não
+    reconhecido também fica de fora: o texto usa a palavra do nicho e nunca
+    se adivinha um psicólogo como outro nicho."""
+    if not regras["poucas_avaliacoes"].get("ativo", True):
+        return False  # desligado para todos os nichos (diretor, 08/10/2026)
+    nicho = nicho_copy_do_lead(lead, regras)
+    excluidos = regras["poucas_avaliacoes"].get("nichos_excluidos") or []
+    return nicho is not None and nicho not in excluidos
 
 
 # --- escolha do ângulo (pista Direta) ---------------------------------------
@@ -713,8 +823,12 @@ def montar_mensagem_nata(
     angulo: str, lead, leads_do_lote: list, *, apresentacao: str, regras: dict, mensagens: dict,
     incluir_consequencia: bool = True,
 ) -> tuple:
-    """Devolve `(mensagem, entrada_derivada)` para os ângulos `contato`,
-    `poucas_avaliacoes` e `lentidao`. `apresentacao` é o texto único da
+    """Devolve `(mensagem, entrada_derivada)` para os ângulos da Nata:
+    `defeito_visivel`, `contato` e `lentidao` (ativos), `poucas_avaliacoes` e
+    `lentidao_moderada` (desligados na config desde 08/10/2026, mas montáveis
+    se forem religados). Para `defeito_visivel`, `entrada_derivada` traz o
+    `texto_encontrado` -- o único endereço que o validador aceita na
+    mensagem (checagem 14). `apresentacao` é o texto único da
     apresentação (`carregar_apresentacao`); o corpo não depende dela.
     `entrada_derivada` é o dict mínimo com só os números que a mensagem pode
     citar -- usado por `validar_mensagem_angulo` (checagem 7, "número fora
@@ -747,8 +861,7 @@ def montar_mensagem_nata(
         encontrado = _texto_encontrado_defeito(lead, regras)
         if encontrado is None:
             raise ValueError("ângulo 'defeito_visivel' sem texto de modelo encontrado")
-        cliente_paciente = "paciente" if setor_e_saude(identidade.get("nicho"), identidade.get("nome"), regras) else "cliente"
-        mensagem = compor("defeito_visivel", texto_encontrado=encontrado, cliente_paciente=cliente_paciente)
+        mensagem = compor("defeito_visivel", texto_encontrado=encontrado)
         return mensagem, {"texto_encontrado": encontrado, "nombre": identidade.get("nome") or ""}
 
     if angulo == "contato":
@@ -766,12 +879,14 @@ def montar_mensagem_nata(
             raise ValueError("ângulo 'poucas_avaliacoes' sem concorrente qualificado no lote")
         nota_fmt = _formatar_nota(nota)
         sufixo = "_singular" if len(concorrentes) == 1 else ""
+        vocabulario = _vocabulario_do_nicho(lead, regras, mensagens)
+        nome_lead = identidade.get("nome") or ""
         if avaliacoes >= 5:
-            mensagem = compor(f"poucas_avaliacoes_5_30{sufixo}", nota=nota_fmt, n=avaliacoes)
-            return mensagem, {"nota_google": nota_fmt, "avaliacoes_google": avaliacoes}
+            mensagem = compor(f"poucas_avaliacoes_5_30{sufixo}", nota=nota_fmt, n=avaliacoes, **vocabulario)
+            return mensagem, {"nota_google": nota_fmt, "avaliacoes_google": avaliacoes, "nombre": nome_lead}
         reseñas_palavra = "reseña" if avaliacoes == 1 else "reseñas"
-        mensagem = compor(f"poucas_avaliacoes_1_4{sufixo}", n=avaliacoes, reseñas_palavra=reseñas_palavra)
-        return mensagem, {"nota_google": nota_fmt, "avaliacoes_google": avaliacoes}
+        mensagem = compor(f"poucas_avaliacoes_1_4{sufixo}", n=avaliacoes, reseñas_palavra=reseñas_palavra, **vocabulario)
+        return mensagem, {"nota_google": nota_fmt, "avaliacoes_google": avaliacoes, "nombre": nome_lead}
 
     if angulo == "lentidao":
         lcp_ms = _lcp_ms_confirmado(lead)
@@ -844,6 +959,16 @@ def montar_mensagem_direta(
         # nota baixa não é citada no 1º contato (diretor, 03/10/2026)
         sem_reputacao = nota < citar_nota["nota_minima"]
     chave = f"{angulo}_sem_reputacao" if sem_reputacao else angulo
+    if angulo == "sem_site":
+        # texto por nicho da campanha (bloco de copy, Fase 1, diretor, 08/10/2026)
+        nicho = nicho_copy_do_lead(linha_csv, regras)
+        if nicho is None or f"{chave}__{nicho}" not in mensagens:
+            raise LinhaPedeRevisaoError(
+                "REVISAR NICHO antes de enviar: o nicho da campanha do lead "
+                f"(campanha_nicho={linha_csv.get('campanha_nicho') or 'não informado'!r}) não corresponde a um texto "
+                "de lead sem site -- a mensagem não sai"
+            )
+        chave = f"{chave}__{nicho}"
 
     valores = {}
     entrada_derivada = {}
@@ -852,11 +977,17 @@ def montar_mensagem_direta(
         valores.update(nota=nota_fmt, n=avaliacoes)
         entrada_derivada.update(nota_google=nota_fmt, avaliacoes_google=avaliacoes)
     if angulo == "portal":
-        valores["portal"] = _nome_por_dominio(linha_csv.get("site"), mensagens.get("nomes_portal", {}))
+        valores["portal"], valores["portal_ref"] = _plataforma_da_mensagem(
+            linha_csv.get("site"), mensagens.get("nomes_portal", {}), mensagens, "portal",
+        )
     elif angulo == "rede_social":
-        valores["rede"] = _nome_por_dominio(linha_csv.get("site"), mensagens.get("nomes_rede", {}))
+        valores["rede"], valores["rede_ref"] = _plataforma_da_mensagem(
+            linha_csv.get("site"), mensagens.get("nomes_rede", {}), mensagens, "rede",
+        )
     elif angulo == "construtor":
-        constructor = _nome_por_dominio(linha_csv.get("site"), mensagens.get("nomes_construtor", {}))
+        constructor, valores["constructor_ref"] = _plataforma_da_mensagem(
+            linha_csv.get("site"), mensagens.get("nomes_construtor", {}), mensagens, "constructor",
+        )
         valores["constructor"] = constructor
         entrada_derivada["constructor"] = constructor
 

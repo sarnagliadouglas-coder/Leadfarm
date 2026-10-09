@@ -6,11 +6,16 @@ de envio preenchida pelo diretor com `registro_abordagens.xlsx` e lista:
 1. **envio não registrado** — linha com "Data 1º contato" preenchida ou
    "Decidi não enviar" = "sim" cujo `place_id` ainda não está no registro
    (resolve com `registro_abordagens.py <planilha>`);
-2. **acompanhamento divergente** — `place_id` já registrado cujo Etapa,
-   Resultado, "Enviada como" ou "Decidi não enviar" na planilha difere do
-   registro. O registro só ACRESCENTA (decisão do diretor, 24/09/2026): essa
-   diferença não é gravada por nenhum comando -- é listada para o diretor
-   decidir.
+2. **mudança de Resultado não registrada** — `place_id` já registrado cujo
+   "Resultado" na planilha está preenchido e difere do último gravado para
+   ele. Desde o funil por eventos (decisão do diretor, 08/10/2026) isso se
+   resolve com `registro_abordagens.py <planilha>`, que acrescenta a mudança
+   como linha nova (evento com data);
+3. **acompanhamento divergente** — `place_id` já registrado cujo Etapa,
+   "Enviada como" ou "Decidi não enviar" na planilha difere do último
+   registro dele, ou cujo Resultado foi APAGADO na planilha. O registro só
+   ACRESCENTA (decisão do diretor, 24/09/2026): essa diferença não é gravada
+   por nenhum comando -- é listada para o diretor decidir.
 
 Decisão do diretor, 28/09/2026: a conferência de resultados vira hábito por
 MECANISMO (este comando, com exit code), não por memória de sessão. Exit 0 =
@@ -51,7 +56,8 @@ def _texto(valor) -> str:
 
 
 def ler_registro(caminho: Path) -> dict:
-    """`{place_id: {coluna: valor}}` do registro. Ausente = `{}`."""
+    """`{place_id: {coluna: valor}}` do registro -- a ÚLTIMA linha de cada
+    lead (o estado mais recente, depois dos eventos). Ausente = `{}`."""
     caminho = Path(caminho)
     if not caminho.is_file():
         return {}
@@ -72,11 +78,13 @@ def ler_registro(caminho: Path) -> dict:
 
 
 def pendencias(caminho_planilha: Path, caminho_registro: Path) -> dict:
-    """`{"nao_registrados": [...], "divergentes": [...]}`. Cada divergência
-    traz `place_id`, `nome`, `coluna`, `no_registro`, `na_planilha`."""
+    """`{"nao_registrados": [...], "eventos_nao_registrados": [...],
+    "divergentes": [...]}`. Cada divergência e cada evento trazem
+    `place_id`, `nome`, `coluna`, `no_registro`, `na_planilha`."""
     linhas = registro_abordagens._linhas_enviadas(Path(caminho_planilha))
     registro = ler_registro(caminho_registro)
     nao_registrados = []
+    eventos = []
     divergentes = []
     for linha in linhas:
         pid = linha["place_id"]
@@ -88,11 +96,14 @@ def pendencias(caminho_planilha: Path, caminho_registro: Path) -> dict:
             planilha = _texto(linha.get(campo))
             gravado = _texto(no_registro.get(coluna))
             if planilha != gravado:
-                divergentes.append({
+                item = {
                     "place_id": pid, "nome": linha.get("nome", ""), "coluna": coluna,
                     "no_registro": gravado, "na_planilha": planilha,
-                })
-    return {"nao_registrados": nao_registrados, "divergentes": divergentes}
+                }
+                # Resultado novo preenchido = evento do funil (registro_abordagens grava);
+                # Resultado apagado e as demais colunas continuam para o diretor decidir
+                (eventos if coluna == "Resultado" and planilha else divergentes).append(item)
+    return {"nao_registrados": nao_registrados, "eventos_nao_registrados": eventos, "divergentes": divergentes}
 
 
 def planilha_mais_recente(diretorio: Path) -> Optional[Path]:
@@ -128,13 +139,18 @@ def main(argv: Optional[list] = None) -> int:
 
     print(f"Planilha: {planilha}")
     print(f"Registro: {caminho_reg}")
-    if not r["nao_registrados"] and not r["divergentes"]:
+    if not r["nao_registrados"] and not r["eventos_nao_registrados"] and not r["divergentes"]:
         print("OK: nada pendente -- o registro está em dia com a planilha.")
         return 0
     if r["nao_registrados"]:
         print(f"\n{len(r['nao_registrados'])} envio(s) NÃO registrado(s) -- rode registro_abordagens.py com esta planilha:")
         for p in r["nao_registrados"]:
             print(f"  - {p['nome']} ({p['place_id']})")
+    if r["eventos_nao_registrados"]:
+        print(f"\n{len(r['eventos_nao_registrados'])} mudança(s) de Resultado ainda não registrada(s) -- "
+              f"rode registro_abordagens.py com esta planilha (cada uma vira uma linha nova):")
+        for d in r["eventos_nao_registrados"]:
+            print(f"  - {d['nome']}: Resultado registro={d['no_registro'] or '(vazio)'} planilha={d['na_planilha']}")
     if r["divergentes"]:
         print(f"\n{len(r['divergentes'])} diferença(s) de acompanhamento em leads já registrados "
               f"(o registro só acrescenta -- decidir com o diretor):")

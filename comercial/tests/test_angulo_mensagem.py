@@ -13,6 +13,7 @@ import pytest
 from contrato_loader import LeadQualificado
 
 import angulo_mensagem as am
+import validador_mensagem
 
 _REGRAS = {
     "poucas_avaliacoes": {
@@ -20,7 +21,13 @@ _REGRAS = {
         "multiplicador_concorrente_minimo": 10,
     },
     "lentidao": {"lcp_minimo_ms": 10000, "rodadas_minimas_para_citar_numero": 2},
+    # bloco de copy, Fase 1 (08/10/2026): poucas_avaliacoes e sem_site dependem do nicho da campanha
+    "nichos_copy": {"psicologos": ["psicolog"], "abogados": ["abogad"], "arquitectos": ["arquitect"]},
 }
+
+# Nicho da campanha dos leads destes testes (fora dos psicólogos, para o
+# ângulo poucas_avaliacoes ficar disponível).
+_NICHO_CAMPANHA = "Abogados"
 
 def _m(fato, consequencia, cta):
     return {"fato": fato, "consequencia": consequencia, "cta": cta}
@@ -46,8 +53,9 @@ _MENSAGENS = {
     "poucas_avaliacoes_1_4_singular": _m("vi su ficha de Google, que todavía tiene solo {n} {reseñas_palavra}.", _C_AVAL_1, _CTA_AVAL),
     "lentidao": _m("abrí su web y estuve unos {s} segundos esperando.", _C_LENT, "¿se lo envío?"),
     "lentidao_sem_numero": _m("abrí su web desde el móvil y estuve bastante rato esperando.", _C_LENT, "¿se lo envío?"),
-    "sem_site": _m("vi su ficha de Google, un {nota} con {n} reseñas, enhorabuena.", _C_SITE, "¿Le llegan más por Google?"),
-    "sem_site_sem_reputacao": _m("vi su ficha de Google y no tiene web propia.", _C_SITE, "¿Le llegan más por Google?"),
+    # bloco de copy, Fase 1 (08/10/2026): sem_site virou um par por nicho da campanha
+    "sem_site__abogados": _m("vi su ficha de Google, un {nota} con {n} reseñas, enhorabuena.", _C_SITE, "¿Le llegan más por Google?"),
+    "sem_site_sem_reputacao__abogados": _m("vi su ficha de Google y no tiene web propia.", _C_SITE, "¿Le llegan más por Google?"),
     "portal": _m("vi su ficha de Google, un {nota} con {n} reseñas, y el enlace lleva a {portal}.", None, "¿Les llegan muchos por {portal}?"),
     "portal_sem_reputacao": _m("vi su ficha de Google y el enlace lleva a {portal}.", None, "¿Les llegan muchos por {portal}?"),
     "rede_social": _m("vi su ficha de Google, un {nota} con {n} reseñas, y el enlace lleva a {rede}.", _C_REDE, "¿Les escriben por {rede}?"),
@@ -57,15 +65,23 @@ _MENSAGENS = {
     "nomes_portal": {"doctoralia.es": "Doctoralia", "topdoctors.es": "Top Doctors"},
     "nomes_rede": {"instagram.com": "Instagram", "facebook.com": "Facebook", "tiktok.com": "TikTok"},
     "nomes_construtor": {"wordpress.com": "WordPress", "wixsite.com": "Wix"},
+    # 09/10/2026: domínio fora do mapa vira termo genérico, nunca o domínio
+    "termos_genericos": {
+        "portal": {"nome": "una plataforma externa", "referencia": "esa plataforma"},
+        "rede": {"nome": "una red social", "referencia": "esa red social"},
+        "constructor": {"nome": "una plataforma externa", "referencia": "esa plataforma"},
+    },
 }
 
 
 def _lead(
     place_id="p1", nicho="Fisioterapia", telefone_na_pagina=None, nota_estado=None, nota_valor=None,
     avaliacoes_estado=None, avaliacoes_valor=None, lcp_ms=None, psi_estado="CONFIRMADO_PRESENTE", rodadas=1,
+    campanha_nicho=_NICHO_CAMPANHA,
 ):
     return LeadQualificado({
         "place_id": place_id,
+        "campanha_nicho": {"valor": campanha_nicho, "estado": "CONFIRMADO_PRESENTE" if campanha_nicho else "NAO_VERIFICADO"},
         "identidade": {"nome": "Clínica Ejemplo", "nicho": nicho, "cidade": None, "endereco": None, "google_maps_url": None},
         "contato": {"whatsapp_apto": True},
         "analise_tecnica_site": (
@@ -349,7 +365,8 @@ def test_angulo_direta_classe_proprio_fica_sem_angulo():
 
 def test_montar_mensagem_direta_sem_site_com_nota_e_avaliacoes():
     mensagem, entrada = am.montar_mensagem_direta(
-        "sem_site", {"nota": "4.9", "avaliacoes": "12"}, apresentacao="", mensagens=_MENSAGENS,
+        "sem_site", {"nota": "4.9", "avaliacoes": "12", "campanha_nicho": _NICHO_CAMPANHA},
+        apresentacao="", mensagens=_MENSAGENS, regras=_REGRAS,
     )
     assert "4,9" in mensagem
     assert entrada["avaliacoes_google"] == 12
@@ -364,7 +381,8 @@ def test_montar_mensagem_sem_site_sem_nota_confirmada_usa_variante_sem_reputacao
     """Controle central: sem nota/avaliações no CSV, a mensagem NÃO fica
     vazia -- usa a variante sem reputação, nunca inventa o número."""
     mensagem, entrada = am.montar_mensagem_direta(
-        "sem_site", {"nota": "", "avaliacoes": ""}, apresentacao="", mensagens=_MENSAGENS,
+        "sem_site", {"nota": "", "avaliacoes": "", "campanha_nicho": _NICHO_CAMPANHA},
+        apresentacao="", mensagens=_MENSAGENS, regras=_REGRAS,
     )
     assert mensagem != ""
     assert "reseñas" not in mensagem
@@ -375,7 +393,8 @@ def test_montar_mensagem_sem_site_com_reputacao_confirmada_usa_o_modelo_normal()
     """Controle positivo: com nota/avaliações confirmadas, continua o
     modelo COM reputação (não a variante)."""
     mensagem, entrada = am.montar_mensagem_direta(
-        "sem_site", {"nota": "4.8", "avaliacoes": "12"}, apresentacao="", mensagens=_MENSAGENS,
+        "sem_site", {"nota": "4.8", "avaliacoes": "12", "campanha_nicho": _NICHO_CAMPANHA},
+        apresentacao="", mensagens=_MENSAGENS, regras=_REGRAS,
     )
     assert "4,8" in mensagem
     assert entrada["avaliacoes_google"] == 12
@@ -385,7 +404,8 @@ def test_montar_mensagem_sem_site_com_zero_avaliacoes_usa_variante_sem_reputacao
     """Prova central: 0 avaliações também cai na variante -- "0 reseñas"
     não é o texto certo."""
     mensagem, entrada = am.montar_mensagem_direta(
-        "sem_site", {"nota": "4.8", "avaliacoes": "0"}, apresentacao="", mensagens=_MENSAGENS,
+        "sem_site", {"nota": "4.8", "avaliacoes": "0", "campanha_nicho": _NICHO_CAMPANHA},
+        apresentacao="", mensagens=_MENSAGENS, regras=_REGRAS,
     )
     assert "reseñas" not in mensagem
     assert entrada == {}
@@ -437,13 +457,15 @@ def test_montar_mensagem_direta_portal_topdoctors():
     assert "Top Doctors" in mensagem
 
 
-def test_montar_mensagem_direta_portal_desconhecido_usa_dominio_cru():
+def test_montar_mensagem_direta_portal_desconhecido_usa_termo_generico():
+    """Diretor, 09/10/2026 (P1 da verificação): domínio fora de `nomes_portal`
+    nunca entra na mensagem -- até esta data entrava cru ("miportal.es")."""
     mensagem, _ = am.montar_mensagem_direta(
         "portal", {"nota": "4.5", "avaliacoes": "8", "site": "https://www.miportal.es/x"},
         apresentacao="", mensagens=_MENSAGENS,
     )
-    assert "miportal.es" in mensagem
-    assert "www." not in mensagem
+    assert "miportal" not in mensagem
+    assert "una plataforma externa" in mensagem
 
 
 # --- rede_social / construtor (decisão do diretor, 25/09/2026, go-live) -----
@@ -481,12 +503,13 @@ def test_montar_mensagem_rede_social_com_zero_avaliacoes_usa_variante_sem_reputa
     assert entrada == {}
 
 
-def test_montar_mensagem_rede_social_dominio_desconhecido_usa_dominio_cru():
+def test_montar_mensagem_rede_social_dominio_desconhecido_usa_termo_generico():
     mensagem, _ = am.montar_mensagem_direta(
         "rede_social", {"nota": "", "avaliacoes": "", "site": "https://www.minhaRede.com/x"},
         apresentacao="", mensagens=_MENSAGENS,
     )
-    assert "minharede.com" in mensagem.lower()
+    assert "minharede" not in mensagem.lower()
+    assert "una red social" in mensagem
 
 
 def test_montar_mensagem_construtor_com_reputacao_cita_nota_e_nome_do_construtor():
@@ -520,33 +543,80 @@ def test_montar_mensagem_construtor_com_zero_avaliacoes_usa_variante_sem_reputac
         apresentacao="", mensagens=_MENSAGENS,
     )
     assert "reseñas" not in mensagem
-    assert entrada == {"constructor": "site247.negocio.site"}
+    assert entrada == {"constructor": "una plataforma externa"}
 
 
-def test_montar_mensagem_construtor_dominio_desconhecido_usa_dominio_cru():
-    """Controle negativo do mapeamento: domínio fora de `nomes_construtor`
-    usa o próprio host, sem "https://" nem "www." (a checagem de URL, regra
-    4, não pode rejeitar o texto -- {constructor} nunca carrega nenhum dos
-    dois)."""
+def test_montar_mensagem_construtor_dominio_desconhecido_usa_termo_generico():
+    """Diretor, 09/10/2026: domínio fora de `nomes_construtor` nunca entra
+    na mensagem (até esta data entrava o host cru, "site247.negocio.site")."""
     mensagem, _ = am.montar_mensagem_direta(
         "construtor", {"nota": "4.5", "avaliacoes": "8", "site": "https://www.site247.negocio.site"},
         apresentacao="", mensagens=_MENSAGENS,
     )
-    assert "https://" not in mensagem
-    assert "www." not in mensagem
-    assert "site247.negocio.site" in mensagem
+    assert "site247" not in mensagem and "negocio.site" not in mensagem
+    assert "una plataforma externa" in mensagem
 
 
-def test_validar_mensagem_angulo_construtor_numero_do_dominio_passa():
-    """Prova central: dígitos que vêm do domínio (ex.: "site247") contam
-    como fato da entrada -- a checagem de "número fora da entrada" (regra
-    7) não pode rejeitar o próprio domínio citado."""
+_EXEMPLOS_DO_VERIFICADOR = [
+    ("construtor", "https://lumen.myportfolio.com"), ("construtor", "https://ortega-marin.blogspot.com"),
+    ("construtor", "https://ortegamarin.business.site"), ("portal", "https://www.paginasamarillas.es/x"),
+    ("portal", "https://www.yelp.es/biz/x"), ("rede_social", "https://linktr.ee/x"),
+    ("rede_social", "https://www.linkedin.com/in/x"),
+]
+
+
+@pytest.mark.parametrize("angulo,site", _EXEMPLOS_DO_VERIFICADOR)
+def test_dominio_fora_do_mapa_nunca_entra_na_mensagem_real(angulo, site):
+    """Os sete exemplos da verificação de 08/10/2026, com a copy REAL: a
+    mensagem usa o termo genérico, não cita nenhum pedaço do domínio e passa
+    no validador real (que recusaria o domínio)."""
+    mensagens = am.carregar_mensagens_angulo()
+    config = validador_mensagem.carregar_config()
     mensagem, entrada = am.montar_mensagem_direta(
-        "construtor", {"nota": "4.5", "avaliacoes": "8", "site": "https://site247.negocio.site"},
-        apresentacao="", mensagens=_MENSAGENS,
+        angulo, {"nota": "", "avaliacoes": "", "site": site, "nome": "Lumen Ficticio Arquitectos"},
+        apresentacao=am.carregar_apresentacao(), mensagens=mensagens,
     )
-    resultado = am.validar_mensagem_angulo(mensagem, "construtor", entrada, config_validacao=_CONFIG_VALIDACAO)
-    assert resultado.valido, resultado.motivos
+    host = site.split("//")[1].split("/")[0].replace("www.", "")
+    for pedaco in host.split("."):
+        assert pedaco.lower() not in mensagem.lower() or pedaco in ("es", "com"), (pedaco, mensagem)
+    assert am.validar_mensagem_angulo(mensagem, angulo, entrada, config_validacao=config).valido
+
+
+@pytest.mark.parametrize("dominio", [h.split("//")[1].split("/")[0].replace("www.", "") for _, h in _EXEMPLOS_DO_VERIFICADOR])
+def test_validador_recusa_qualquer_dominio_na_mensagem(dominio):
+    """Controle do outro lado: se um domínio chegasse à mensagem, o validador
+    real recusaria (checagem 14), mesmo sem "http" nem "www"."""
+    config = validador_mensagem.carregar_config()
+    mensagem = am.MensagemComposta(f"Hola, buenas. Su web está en {dominio}. ¿Le paso una captura?")
+    resultado = am.validar_mensagem_angulo(mensagem, "construtor", {}, config_validacao=config)
+    assert any("domínio" in m for m in resultado.motivos), resultado.motivos
+
+
+def test_validador_aceita_so_o_email_citado_pelo_defeito_visivel():
+    config = validador_mensagem.carregar_config()
+    mensagem = am.MensagemComposta('Hola, buenas. En su web aparece el correo "info@tudominio.com". ¿Le paso una captura?')
+    assert am.validar_mensagem_angulo(
+        mensagem, "defeito_visivel", {"texto_encontrado": "info@tudominio.com"}, config_validacao=config,
+    ).valido
+    # controle: sem ser o e-mail achado (ou com outro e-mail), recusa
+    assert not am.validar_mensagem_angulo(mensagem, "defeito_visivel", {}, config_validacao=config).valido
+    outro = am.MensagemComposta('Hola, buenas. Escríbame a douglas@otro.es o mire info@tudominio.com. ¿Sí?')
+    resultado = am.validar_mensagem_angulo(
+        outro, "defeito_visivel", {"texto_encontrado": "info@tudominio.com"}, config_validacao=config,
+    )
+    assert any("otro.es" in m for m in resultado.motivos), resultado.motivos
+
+
+def test_dominio_do_mapa_continua_saindo_pelo_nome():
+    """Controle negativo: o termo genérico só vale fora do mapa."""
+    mensagens = am.carregar_mensagens_angulo()
+    for angulo, site, nome in (("portal", "https://www.doctoralia.es/x", "Doctoralia"),
+                               ("rede_social", "https://instagram.com/x", "Instagram"),
+                               ("construtor", "https://x.wixsite.com/y", "Wix")):
+        mensagem, _ = am.montar_mensagem_direta(
+            angulo, {"nota": "", "avaliacoes": "", "site": site}, apresentacao="", mensagens=mensagens,
+        )
+        assert nome in mensagem and "plataforma externa" not in mensagem and "una red social" not in mensagem
 
 
 # --- nota baixa não é citada no 1º contato (diretor, 03/10/2026) ------------
@@ -754,11 +824,14 @@ def test_campanha_ativa_ausente_levanta_erro_claro(tmp_path, monkeypatch):
 
 
 def test_cta_tipo_por_angulo_cobre_todos_os_angulos_com_mensagem():
-    """`construtor` não recebe Revisión breve neste rollout (sem captura
-    automática -- classe_site != "proprio"); `contato`/`lentidao` oferecem;
-    os demais mantêm o CTA diagnóstico da Fase 3."""
-    assert am.CTA_TIPO_POR_ANGULO["contato"] == "revision"
-    assert am.CTA_TIPO_POR_ANGULO["lentidao"] == "revision"
+    """Bloco de copy, Fase 1 (diretor, 08/10/2026): na Nata o fecho é a
+    captura (`contato`, `lentidao`, `defeito_visivel`); na Direta sem site,
+    o exemplo pronto; `construtor` continua "confirmacion" e os demais, o
+    CTA diagnóstico da Fase 3."""
+    for angulo in ("contato", "lentidao", "defeito_visivel"):
+        assert am.CTA_TIPO_POR_ANGULO[angulo] == "captura"
+    assert am.CTA_TIPO_POR_ANGULO["sem_site"] == "ejemplo"
     assert am.CTA_TIPO_POR_ANGULO["construtor"] == "confirmacion"
-    for angulo in ("poucas_avaliacoes", "sem_site", "portal", "rede_social"):
+    for angulo in ("poucas_avaliacoes", "portal", "rede_social"):
         assert am.CTA_TIPO_POR_ANGULO[angulo] == "diagnostico"
+    assert set(am.ANGULOS_NATA) <= set(am.CTA_TIPO_POR_ANGULO)

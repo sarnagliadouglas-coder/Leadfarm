@@ -22,18 +22,23 @@ JSON hand-off + human CSV from the QUALIFICADOR
 
 ## How the angle is chosen
 
-- **Leads with their own website:** the first angle the lead fits — contact is hard on a
-  phone, few reviews compared with a competitor from the same search, or a slow site on
-  mobile. No angle, no message.
+- **Leads with their own website:** the first angle the lead fits, in this order — a
+  template e-mail address left on the site, a phone number that cannot be tapped on a
+  phone, or a slow site on mobile (Google's speed test, at least 10 seconds, measured
+  twice). No angle, no message. Other angles (few reviews, moderately slow, slow measured
+  only once) exist in the templates but are switched off in `config/angulo_regras.json`.
 - **Leads without their own website** (none, a directory portal, a social network, a
-  free site builder): one template per situation.
+  free site builder): one template per situation; the "no website" text depends on the
+  niche of the lead's campaign (psychologists, lawyers, architects).
 
-Every message follows *measured fact → plausible consequence → small question or
-ready-made offer*. A deterministic validator blocks, among other things, any number that
-did not come from a measurement, prices, links, the business name, and sentences that
-state an unmeasured outcome ("you are losing patients") rather than a hedged one ("this
-can add friction"). The opening line is A/B-tested in two variants with an identical
-message body, balanced by angle and channel.
+Every message follows *greeting and who is writing → measured fact → plausible
+consequence → small question*. A deterministic validator blocks, among other things, any
+number that did not come from a measurement, prices, links and any domain or address (even
+without "http"/"www" — a platform that is not on the known list is named generically, e.g.
+"una plataforma externa"; the only exception is the template e-mail that the "template e-mail"
+message quotes as evidence), the business name, and
+sentences that state an unmeasured outcome ("you are losing patients") rather than a
+hedged one ("this can add friction").
 
 ## Running it
 
@@ -41,12 +46,24 @@ message body, balanced by angle and channel.
 # build the outreach sheet from the latest QUALIFICADOR batch
 python ferramentas/planilha_envio.py --saida-dir "<output folder>"
 
-# after sending: log who was contacted
+# after sending: log who was contacted -- run it again whenever a "Resultado" changes
 python ferramentas/registro_abordagens.py "<filled-in sheet>"
 
-# check whether any sent message is still missing from the log (read-only)
+# check whether any sent message or result change is still missing from the log (read-only)
 python ferramentas/pendencias_registro.py "<filled-in sheet>"
+
+# the funnel of each lead, from the log (read-only)
+python ferramentas/registro_abordagens.py --funil
+python ferramentas/registro_abordagens.py --funil --place-id "<place_id>"
 ```
+
+The contact log only ever appends. The first row of a lead is its send (`evento` =
+`envio`); each later change of "Resultado" in the sheet (e.g. *pediu exemplo* →
+*proposta* → *cliente*) becomes a new row (`evento` = `resultado`) dated with the computer's
+**local** date and time of the moment the log was updated (no time-zone suffix), not the
+moment the change happened. A lead that is new in two tabs of the same sheet is logged once.
+Running it again with the same result adds nothing. `--funil` prints each lead's sequence and how many leads reached each
+result; it never writes.
 
 The contract location is resolved automatically; optional variables are listed in
 [`.env.example`](.env.example).

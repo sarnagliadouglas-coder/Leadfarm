@@ -6,6 +6,8 @@
   "palavras_preco": ["precio", "precios", "coste", "costo", "tarifa", "tarifas", "euro", "euros", "gratis", "descuento", "presupuesto"],
   "marcas_informais_es": ["tú", "tu", "te", "tienes", "puedes", "quieres", "sabes", "tuyo", "tuya", "vos"],
   "saudacao_fixa": "Hola, buenas",
+  "_nota_padrao_dominio": "09/10/2026 (diretor): checagem 14 do validador -- nenhum domínio ou endereço na mensagem (ex.: lumen.myportfolio.com, ortega-marin.blogspot.com, linktr.ee, yelp.es, e-mails), mesmo sem http/www. Única exceção: o e-mail citado pelo defeito_visivel.",
+  "padrao_dominio": "(?<![\\w.-])(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+[a-z]{2,24}\\b",
   "termos_proibidos": [
     "está caído", "está caída", "caído", "caída", "no funciona", "está roto", "está rota", "fuera de servicio", "celular",
     "está perdiendo", "pierde pacientes", "perder pacientes", "se van a la competencia", "se van a otra",
