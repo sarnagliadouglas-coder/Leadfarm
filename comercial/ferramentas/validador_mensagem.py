@@ -10,7 +10,9 @@ Treze checagens (1-12 do desenho aprovado em 23/09; 13 da mudança 2, 27/09/2026
 3. `mensagem_1` termina com `"?"`.
 4. `mensagem_1` sem URL.
 5. `mensagem_1` sem símbolo de moeda nem palavra de preço.
-6. `mensagem_1` sem marca de tratamento informal (usted é obrigatório).
+6. `mensagem_1` sem marca de tratamento informal (usted é obrigatório). O
+   e-mail citado pelo `defeito_visivel` (`texto_encontrado`) fica fora desta
+   checagem: "tu@email.com" é a evidência, não tuteo.
 7. Todo número presente em `mensagem_1` existe em algum lugar da entrada
    daquele lead — nunca um número inventado pelo modelo. Conta como número
    tanto dígito (`\\d+`) quanto número por extenso em espanhol
@@ -339,15 +341,18 @@ def validar_mensagem(
     if re.search(r"https?://|www\.", mensagem, re.IGNORECASE):
         motivos.append("mensagem_1 contém URL")
 
+    # o e-mail de modelo que o `defeito_visivel` cita (`entrada["texto_encontrado"]`)
+    # é a própria evidência: sai do texto antes das checagens de domínio
+    # (checagem 14) e de tratamento informal ("tu@email.com" não é tuteo)
+    sem_permitidos = mensagem
+    permitido = entrada.get("texto_encontrado")
+    if isinstance(permitido, str) and permitido:
+        sem_permitidos = sem_permitidos.replace(permitido, " ")
+
     padrao_dominio = config.get("padrao_dominio")
     if padrao_dominio:
         # checagem 14: nenhum domínio nem endereço, nem sem "http"/"www" -- a
-        # única exceção é o e-mail de modelo que o `defeito_visivel` cita
-        # (`entrada["texto_encontrado"]`), que é a própria evidência
-        sem_permitidos = mensagem
-        permitido = entrada.get("texto_encontrado")
-        if isinstance(permitido, str) and permitido:
-            sem_permitidos = sem_permitidos.replace(permitido, " ")
+        # única exceção é o e-mail citado pelo `defeito_visivel` (acima)
         dominios = re.findall(padrao_dominio, sem_permitidos, re.IGNORECASE)
         if dominios:
             motivos.append(f"mensagem_1 contém domínio ou endereço: {dominios}")
@@ -363,7 +368,7 @@ def validar_mensagem(
         motivos.append(f"mensagem_1 contém palavra de preço: {achadas_preco}")
 
     achadas_informais = [
-        m for m in config["marcas_informais_es"] if re.search(rf"\b{re.escape(m)}\b", mensagem, re.IGNORECASE)
+        m for m in config["marcas_informais_es"] if re.search(rf"\b{re.escape(m)}\b", sem_permitidos, re.IGNORECASE)
     ]
     if achadas_informais:
         motivos.append(f"mensagem_1 contém tratamento informal: {achadas_informais}")

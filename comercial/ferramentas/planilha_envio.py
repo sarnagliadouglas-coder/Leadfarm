@@ -132,18 +132,25 @@ COLUNAS_DIRETOR = (
 # a aba Geral já tem "cidade" (a do endereço da ficha).
 COLUNAS_CAMPANHA = ("campanha", "nicho", "prioridade_rotulo", "prioridade_score", "cidade_conferida")
 
+# "Atendimento WhatsApp" (diretor, 12/10/2026) é a ÚLTIMA coluna das duas abas,
+# preenchida pelo operador com a lista de config/funil_planilha.json; o nome vem
+# de registro_abordagens (única fonte), que a grava como evento.
 COLUNAS_GERAL = (
     "pista", "motivo", "nome", "cidade", "telefone", "WhatsApp", "email", "Abrir e-mail", "Canal",
     "instagram", "site", "classe_site", "avaliacoes", "nota", "google_maps_url",
     "Ângulo", "Mensagem sugerida", "Profissional detectado", "Captura",
-) + COLUNAS_DIRETOR + ("Aviso", "Contexto para IA", "place_id") + COLUNAS_CAMPANHA
+) + COLUNAS_DIRETOR + ("Aviso", "Contexto para IA", "place_id") + COLUNAS_CAMPANHA + (
+    registro_abordagens.COLUNA_ATENDIMENTO,
+)
 
 COLUNAS_NATA = (
     "pista", "nome", "telefone", "WhatsApp", "email", "Abrir e-mail", "Canal",
     "problema vendável", "Ângulo", "mensagem", "Status",
     "conferir_antes_de_enviar", "Profissional detectado", "Captura",
     "site", "google_maps_url", "texto_site",
-) + COLUNAS_DIRETOR + ("Aviso", "Contexto para IA", "place_id") + COLUNAS_CAMPANHA
+) + COLUNAS_DIRETOR + ("Aviso", "Contexto para IA", "place_id") + COLUNAS_CAMPANHA + (
+    registro_abordagens.COLUNA_ATENDIMENTO,
+)
 
 STATUS_SEM_MENSAGEM = "sem mensagem gerada"
 # Lead com ângulo cuja mensagem não sai pronta (`LinhaPedeRevisaoError`): o
@@ -179,6 +186,16 @@ _COMO_USAR_TEXTO = (
         'Quando o lead avançar, atualize "Resultado" (pediu exemplo, proposta, cliente) e rode o registro '
         "de abordagens com esta planilha: cada mudança vira uma linha nova, com a data e a hora locais do "
         "registro (o momento em que você roda o comando, não o da mudança).",
+    ),
+    (
+        "Atendimento WhatsApp",
+        'Como o lead atende no WhatsApp. Marque o que chegar PRIMEIRO: auto-resposta seguida de uma pessoa '
+        '= "auto-resposta simples". "humano" = a primeira resposta é de uma pessoa, escrita para você. '
+        '"auto-resposta simples" = uma mensagem automática fixa (boas-vindas, ausência, horário), sem opções '
+        'para escolher. "menu/bot" = uma resposta automática com opções ou botões para escolher, ou perguntas '
+        'em sequência. "agente IA" = uma resposta automática que conversa em texto livre e responde ao que '
+        'você escreveu. "sem resposta (48h)" = nada chegou em 48 horas depois do envio. Preencher ou mudar '
+        "o valor vira uma linha nova no registro de abordagens, como o Resultado.",
     ),
     (
         "Profissional detectado",

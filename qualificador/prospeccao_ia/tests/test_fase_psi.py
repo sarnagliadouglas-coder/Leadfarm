@@ -190,3 +190,144 @@ def test_medicao_boa_nunca_e_refeita(tmp_path, monkeypatch):
     assert main_mod.fase_psi() is None
     salvo = json.loads(caminho.read_text(encoding="utf-8"))[0]
     assert salvo["psi"]["performance_score"] == 91
+
+
+# --- segunda medição dos sites com LCP >= 10 s (decisão do diretor, 12/10/2026) ------------
+
+def _lento(place_id, lcp_ms, rodadas=1, **extra):
+    psi = {"estado": "CONFIRMADO_PRESENTE", "performance_score": 20, "lcp_ms": lcp_ms,
+           "medido_em": "m1", "falha_transiente": False, "rodadas": rodadas}
+    psi.update(extra)
+    return _registro(place_id=place_id, psi=psi)
+
+
+def _medir_lcp(monkeypatch, lcp_ms, estado="CONFIRMADO_PRESENTE", transiente=False, registrar=None):
+    def _fake(url, **k):
+        if registrar is not None:
+            registrar.append(url)
+        return {"estado": estado, "lcp_ms": lcp_ms if estado == "CONFIRMADO_PRESENTE" else None,
+                "medido_em": "m2", "motivo": None if estado == "CONFIRMADO_PRESENTE" else "falha",
+                "falha_transiente": transiente, "tentativas": 1, "performance_score": 30}
+    monkeypatch.setattr(psi_client, "medir", _fake)
+
+
+def _salvo(caminho):
+    return {r["dados_empresa"]["place_id"]: r for r in json.loads(caminho.read_text(encoding="utf-8"))}
+
+
+def test_so_quem_deu_10s_ou_mais_tem_segunda_medicao(tmp_path, monkeypatch):
+    monkeypatch.setenv("PSI_ENABLED", "1")
+    caminho = _isolar(tmp_path, monkeypatch)
+    caminho.write_text(json.dumps([
+        _lento("lento", 12000), _lento("no_limiar", 10000), _lento("rapido", 9999),
+    ]), encoding="utf-8")
+    medidos = []
+    _medir_lcp(monkeypatch, 11000, registrar=medidos)
+
+    resultado = main_mod.fase_psi()
+
+    assert resultado["medidos"] == 2
+    salvo = _salvo(caminho)
+    assert "segunda_medicao" in salvo["lento"]["psi"]
+    assert "segunda_medicao" in salvo["no_limiar"]["psi"]
+    assert "segunda_medicao" not in salvo["rapido"]["psi"], "9,999 s não é medido de novo"
+    assert salvo["rapido"]["psi"]["lcp_ms"] == 9999
+
+
+def test_concordancia_cita_o_menor_dos_dois(tmp_path, monkeypatch):
+    monkeypatch.setenv("PSI_ENABLED", "1")
+    caminho = _isolar(tmp_path, monkeypatch)
+    caminho.write_text(json.dumps([_lento("a", 14000), _lento("b", 11000)]), encoding="utf-8")
+    _medir_lcp(monkeypatch, 12500)
+
+    main_mod.fase_psi()
+
+    salvo = _salvo(caminho)
+    for pid, menor, primeira in (("a", 12500, 14000), ("b", 11000, 11000)):
+        psi = salvo[pid]["psi"]
+        assert psi["segunda_medicao"]["concorda"] is True
+        assert psi["segunda_medicao"]["lcp_ms_primeira"] == primeira
+        assert psi["segunda_medicao"]["lcp_ms"] == 12500
+        assert psi["lcp_ms"] == menor
+        assert psi["rodadas"] == 2
+        assert psi["performance_score"] == 20, "o resto do bloco continua sendo o da primeira"
+
+
+def test_segunda_abaixo_do_limiar_nao_concorda_e_fica_a_mais_recente(tmp_path, monkeypatch):
+    monkeypatch.setenv("PSI_ENABLED", "1")
+    caminho = _isolar(tmp_path, monkeypatch)
+    caminho.write_text(json.dumps([_lento("a", 15000)]), encoding="utf-8")
+    _medir_lcp(monkeypatch, 9999)
+
+    main_mod.fase_psi()
+
+    psi = _salvo(caminho)["a"]["psi"]
+    assert psi["segunda_medicao"]["concorda"] is False
+    assert psi["lcp_ms"] == 9999
+    # e não volta pra fila: a medição válida mais recente ficou abaixo do limiar
+    assert main_mod.fase_psi() is None
+
+
+def test_segunda_que_falhou_nao_concorda_e_mantem_a_primeira(tmp_path, monkeypatch):
+    monkeypatch.setenv("PSI_ENABLED", "1")
+    caminho = _isolar(tmp_path, monkeypatch)
+    caminho.write_text(json.dumps([_lento("perm", 13000), _lento("trans", 13000)]), encoding="utf-8")
+    _medir_lcp(monkeypatch, None, estado=psi_client.NAO_VERIFICADO, transiente=False)
+    main_mod.fase_psi()
+    psi = _salvo(caminho)["perm"]["psi"]
+    assert psi["segunda_medicao"]["concorda"] is False
+    assert psi["lcp_ms"] == 13000
+    assert psi["estado"] == "CONFIRMADO_PRESENTE"
+    # falha permanente: nada a reagendar
+    assert main_mod.fase_psi() is None
+
+
+def test_segunda_com_falha_transiente_volta_ate_o_teto(tmp_path, monkeypatch):
+    monkeypatch.setenv("PSI_ENABLED", "1")
+    caminho = _isolar(tmp_path, monkeypatch)
+    caminho.write_text(json.dumps([_lento("a", 13000)]), encoding="utf-8")
+    medidos = []
+    _medir_lcp(monkeypatch, None, estado=psi_client.NAO_VERIFICADO, transiente=True, registrar=medidos)
+    for _ in range(main_mod.PSI_MAX_RODADAS_POR_LEAD + 2):
+        main_mod.fase_psi()
+    assert len(medidos) == main_mod.PSI_MAX_RODADAS_POR_LEAD
+    assert _salvo(caminho)["a"]["psi"]["segunda_medicao"]["rodadas"] == main_mod.PSI_MAX_RODADAS_POR_LEAD
+
+    # depois de uma transiente, a segunda que dá certo concorda com a PRIMEIRA medição
+    caminho.write_text(json.dumps([_lento("b", 13000)]), encoding="utf-8")
+    _medir_lcp(monkeypatch, None, estado=psi_client.NAO_VERIFICADO, transiente=True)
+    main_mod.fase_psi()
+    _medir_lcp(monkeypatch, 16000)
+    main_mod.fase_psi()
+    psi = _salvo(caminho)["b"]["psi"]
+    assert psi["segunda_medicao"]["concorda"] is True
+    assert psi["segunda_medicao"]["lcp_ms_primeira"] == 13000
+    assert psi["lcp_ms"] == 13000
+
+
+def test_segunda_medicao_acontece_uma_vez_so(tmp_path, monkeypatch):
+    monkeypatch.setenv("PSI_ENABLED", "1")
+    caminho = _isolar(tmp_path, monkeypatch)
+    caminho.write_text(json.dumps([_lento("a", 13000)]), encoding="utf-8")
+    medidos = []
+    _medir_lcp(monkeypatch, 12000, registrar=medidos)
+    main_mod.fase_psi()
+    assert main_mod.fase_psi() is None
+    assert len(medidos) == 1
+
+
+def test_nunca_medido_e_retry_vem_antes_da_segunda_medicao(tmp_path, monkeypatch):
+    monkeypatch.setenv("PSI_ENABLED", "1")
+    monkeypatch.setattr(main_mod, "PSI_BATCH_SIZE", 2)
+    caminho = _isolar(tmp_path, monkeypatch)
+    caminho.write_text(json.dumps([
+        _lento("lento", 13000), _falhou("retry"), _registro(place_id="novo"),
+    ]), encoding="utf-8")
+    _medir_lcp(monkeypatch, 3000)
+
+    main_mod.fase_psi()
+
+    salvo = _salvo(caminho)
+    assert "segunda_medicao" not in salvo["lento"]["psi"], "segunda medição fica pra próxima"
+    assert salvo["novo"]["psi"]["estado"] == "CONFIRMADO_PRESENTE"
+    assert salvo["retry"]["psi"]["estado"] == "CONFIRMADO_PRESENTE"

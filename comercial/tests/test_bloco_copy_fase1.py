@@ -32,9 +32,14 @@ _ABERTURA = "Hola, buenas. Soy Douglas, diseño webs. "
 def _lead(
     place_id="p1", campanha_nicho="Abogados", nome="Bufete Ficticio Alameda", nicho_google="Abogado",
     email=None, telefone_na_pagina=None, nota=None, avaliacoes=None, lcp_ms=None, rodadas=2, cidade="Murcia",
+    concorda=True,
 ):
     def ev(valor):
         return {"valor": valor, "estado": "CONFIRMADO_PRESENTE" if valor not in (None, "") else "NAO_VERIFICADO"}
+
+    psi = {"estado": "CONFIRMADO_PRESENTE", "lcp_ms": lcp_ms, "motivo": None, "medido_em": None, "rodadas": rodadas}
+    if concorda is not None:  # segunda medição do QUALIFICADOR (12/10/2026); None = lote sem o bloco
+        psi["segunda_medicao"] = {"concorda": concorda, "lcp_ms": lcp_ms, "lcp_ms_primeira": lcp_ms}
 
     return LeadQualificado({
         "place_id": place_id,
@@ -47,10 +52,7 @@ def _lead(
         },
         "reputacao": {"nota_google": ev(nota), "review_count": ev(avaliacoes)},
         "problema_vendavel": [],
-        "psi": (
-            {"estado": "CONFIRMADO_PRESENTE", "lcp_ms": lcp_ms, "motivo": None, "medido_em": None, "rodadas": rodadas}
-            if lcp_ms is not None else None
-        ),
+        "psi": psi if lcp_ms is not None else None,
     })
 
 

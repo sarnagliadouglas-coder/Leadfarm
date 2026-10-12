@@ -27,11 +27,10 @@ das Etapas anteriores — reusado, não reimplementado.
    reseña(s)").
 3. `lentidao` — `psi.lcp_ms` confirmado >= `lcp_minimo_ms`. O número de
    segundos só entra na mensagem quando o PSI tem pelo menos
-   `rodadas_minimas_para_citar_numero` rodadas medidas (o contrato só guarda
-   o `lcp_ms` mais recente, não um histórico por rodada — a checagem usa
-   `rodadas` + o `lcp_ms` disponível, não uma verificação rodada a rodada;
-   ver limitação no RETORNO da tarefa); sem isso, o mesmo ângulo usa o texto
-   sem número.
+   `rodadas_minimas_para_citar_numero` rodadas E a segunda medição do
+   QUALIFICADOR concordou (`psi.segunda_medicao.concorda` true: as duas
+   medições >= 10 s; `lcp_ms` é então o menor dos dois — decisão do diretor,
+   12/10/2026); sem isso, o mesmo ângulo usa o texto sem número.
 4. `sem_angulo` — nenhuma das anteriores. Sem mensagem.
 
 Pista Direta: `sem_site` (classe_site == "sem_site") ou `portal` (classe_site
@@ -458,6 +457,16 @@ def _telefone_na_pagina_e_texto(lead) -> bool:
     return bool(campo) and hasattr(campo, "presente") and campo.presente() and campo.valor_confirmado == "texto"
 
 
+def _site_tem_link_whatsapp(lead) -> bool:
+    """`True` só quando o sinal estático do QUALIFICADOR encontrou link de
+    WhatsApp no HTML (`evidencias_qualificador.sinais_site.has_whatsapp_link`
+    true). Sinal ausente, falso ou não medido -> `False`: a ausência no HTML
+    estático não prova ausência no site (D15), então não bloqueia o ângulo."""
+    evidencias = lead.get("evidencias_qualificador")
+    sinais = evidencias.get("sinais_site") if isinstance(evidencias, dict) else None
+    return isinstance(sinais, dict) and sinais.get("has_whatsapp_link") is True
+
+
 # --- ângulo "poucas_avaliacoes" ----------------------------------------------
 
 
@@ -549,17 +558,19 @@ def _lcp_ms_confirmado(lead) -> Optional[int]:
 
 
 def _medicao_consistente_para_citar_numero(lead, rodadas_minimas: int) -> bool:
-    """`True` só quando o PSI tem pelo menos `rodadas_minimas` rodadas
-    medidas. O contrato só guarda o `lcp_ms` mais recente (não um histórico
-    por rodada) -- não dá para checar "todas as rodadas >= 10000ms"
-    literalmente; esta função usa `rodadas` como proxy de medição
-    consistente, combinado com o `lcp_ms` disponível (ver limitação no
-    RETORNO da tarefa)."""
+    """`True` só quando o PSI tem pelo menos `rodadas_minimas` rodadas E a
+    segunda medição do QUALIFICADOR concordou com a primeira
+    (`psi.segunda_medicao.concorda is True`). `rodadas` sozinho não basta:
+    conta também rodada que falhou, então 2 rodadas podem ser uma medição
+    válida só. Lote anterior à segunda medição não tem o bloco -> `False`."""
     psi = lead.get("psi")
     if not isinstance(psi, dict):
         return False
     rodadas = psi.get("rodadas") or 0
-    return isinstance(rodadas, (int, float)) and rodadas >= rodadas_minimas
+    if not (isinstance(rodadas, (int, float)) and rodadas >= rodadas_minimas):
+        return False
+    segunda = psi.get("segunda_medicao")
+    return isinstance(segunda, dict) and segunda.get("concorda") is True
 
 
 # --- ângulo "defeito_visivel" (desligado até o diretor aprovar os padrões) ----
@@ -745,7 +756,9 @@ def escolher_angulo_nata(lead, leads_do_lote: list, regras: dict) -> str:
     if _texto_encontrado_defeito(lead, regras) is not None:
         return "defeito_visivel"
 
-    if _telefone_na_pagina_e_texto(lead):
+    # site com link de WhatsApp: o telefone não clicável perde força como
+    # argumento -- o lead segue para os ângulos seguintes (diretor, 12/10/2026)
+    if _telefone_na_pagina_e_texto(lead) and not _site_tem_link_whatsapp(lead):
         return "contato"
 
     lcp_ms = _lcp_ms_confirmado(lead)

@@ -54,8 +54,11 @@ def _regras_com_defeito(ativo=True, padroes=None):
 
 def _lead(
     place_id="p1", nome="Clínica Dental Sol", nicho="Clínica dental", lcp_ms=None, rodadas=2,
-    email=None, telefone_na_pagina=None, cidade=_CIDADE,
+    email=None, telefone_na_pagina=None, cidade=_CIDADE, concorda=True,
 ):
+    psi = {"estado": "CONFIRMADO_PRESENTE", "lcp_ms": lcp_ms, "motivo": None, "medido_em": None, "rodadas": rodadas}
+    if concorda is not None:  # segunda medição do QUALIFICADOR (12/10/2026); None = lote sem o bloco
+        psi["segunda_medicao"] = {"concorda": concorda, "lcp_ms": lcp_ms, "lcp_ms_primeira": lcp_ms}
     return LeadQualificado({
         "place_id": place_id,
         "campanha_cidade": {"valor": cidade, "estado": "CONFIRMADO_PRESENTE" if cidade else "NAO_VERIFICADO"},
@@ -73,10 +76,7 @@ def _lead(
             "review_count": {"valor": None, "estado": "NAO_VERIFICADO"},
         },
         "problema_vendavel": [],
-        "psi": (
-            {"estado": "CONFIRMADO_PRESENTE", "lcp_ms": lcp_ms, "motivo": None, "medido_em": None, "rodadas": rodadas}
-            if lcp_ms is not None else None
-        ),
+        "psi": psi if lcp_ms is not None else None,
     })
 
 

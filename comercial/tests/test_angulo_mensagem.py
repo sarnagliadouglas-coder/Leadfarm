@@ -77,8 +77,11 @@ _MENSAGENS = {
 def _lead(
     place_id="p1", nicho="Fisioterapia", telefone_na_pagina=None, nota_estado=None, nota_valor=None,
     avaliacoes_estado=None, avaliacoes_valor=None, lcp_ms=None, psi_estado="CONFIRMADO_PRESENTE", rodadas=1,
-    campanha_nicho=_NICHO_CAMPANHA,
+    campanha_nicho=_NICHO_CAMPANHA, concorda=True,
 ):
+    psi = {"estado": psi_estado, "lcp_ms": lcp_ms, "motivo": None, "medido_em": None, "rodadas": rodadas}
+    if concorda is not None:  # segunda medição do QUALIFICADOR (12/10/2026); None = lote sem o bloco
+        psi["segunda_medicao"] = {"concorda": concorda, "lcp_ms": lcp_ms, "lcp_ms_primeira": lcp_ms}
     return LeadQualificado({
         "place_id": place_id,
         "campanha_nicho": {"valor": campanha_nicho, "estado": "CONFIRMADO_PRESENTE" if campanha_nicho else "NAO_VERIFICADO"},
@@ -93,10 +96,7 @@ def _lead(
             "review_count": {"valor": avaliacoes_valor, "estado": avaliacoes_estado or "NAO_VERIFICADO"},
         },
         "problema_vendavel": [],
-        "psi": (
-            {"estado": psi_estado, "lcp_ms": lcp_ms, "motivo": None, "medido_em": None, "rodadas": rodadas}
-            if lcp_ms is not None or psi_estado != "CONFIRMADO_PRESENTE" else None
-        ),
+        "psi": psi if lcp_ms is not None or psi_estado != "CONFIRMADO_PRESENTE" else None,
     })
 
 

@@ -10,7 +10,8 @@ de envio preenchida pelo diretor com `registro_abordagens.xlsx` e lista:
    "Resultado" na planilha está preenchido e difere do último gravado para
    ele. Desde o funil por eventos (decisão do diretor, 08/10/2026) isso se
    resolve com `registro_abordagens.py <planilha>`, que acrescenta a mudança
-   como linha nova (evento com data);
+   como linha nova (evento com data). O mesmo vale para "Atendimento
+   WhatsApp" (decisão do diretor, 12/10/2026);
 3. **acompanhamento divergente** — `place_id` já registrado cujo Etapa,
    "Enviada como" ou "Decidi não enviar" na planilha difere do último
    registro dele, ou cujo Resultado foi APAGADO na planilha. O registro só
@@ -46,7 +47,12 @@ CAMPOS_ACOMPANHAMENTO = (
     ("resultado", "Resultado"),
     ("mensagem_status", "Enviada como"),
     ("decidiu_nao_enviar", "Decidi não enviar"),
+    ("atendimento", registro_abordagens.COLUNA_ATENDIMENTO),
 )
+
+# Colunas cuja mudança para um valor preenchido é EVENTO (registro_abordagens grava
+# como linha nova); valor apagado continua divergência para o diretor decidir.
+COLUNAS_EVENTO = ("Resultado", registro_abordagens.COLUNA_ATENDIMENTO)
 
 ENV_PLANILHAS_DIR = "COMERCIAL_PLANILHAS_DIR"
 
@@ -83,6 +89,7 @@ def pendencias(caminho_planilha: Path, caminho_registro: Path) -> dict:
     `place_id`, `nome`, `coluna`, `no_registro`, `na_planilha`."""
     linhas = registro_abordagens._linhas_enviadas(Path(caminho_planilha))
     registro = ler_registro(caminho_registro)
+    historico = registro_abordagens._linhas_por_lead(Path(caminho_registro))
     nao_registrados = []
     eventos = []
     divergentes = []
@@ -95,14 +102,18 @@ def pendencias(caminho_planilha: Path, caminho_registro: Path) -> dict:
         for campo, coluna in CAMPOS_ACOMPANHAMENTO:
             planilha = _texto(linha.get(campo))
             gravado = _texto(no_registro.get(coluna))
+            if coluna == registro_abordagens.COLUNA_ATENDIMENTO:
+                # o mesmo critério do registro: o último valor PREENCHIDO do lead
+                gravado = registro_abordagens.ultimo_atendimento(historico.get(pid, []))
             if planilha != gravado:
                 item = {
                     "place_id": pid, "nome": linha.get("nome", ""), "coluna": coluna,
                     "no_registro": gravado, "na_planilha": planilha,
                 }
-                # Resultado novo preenchido = evento do funil (registro_abordagens grava);
-                # Resultado apagado e as demais colunas continuam para o diretor decidir
-                (eventos if coluna == "Resultado" and planilha else divergentes).append(item)
+                # valor novo preenchido em Resultado ou Atendimento WhatsApp = evento
+                # (registro_abordagens grava); valor apagado e as demais colunas
+                # continuam para o diretor decidir
+                (eventos if coluna in COLUNAS_EVENTO and planilha else divergentes).append(item)
     return {"nao_registrados": nao_registrados, "eventos_nao_registrados": eventos, "divergentes": divergentes}
 
 
@@ -147,10 +158,10 @@ def main(argv: Optional[list] = None) -> int:
         for p in r["nao_registrados"]:
             print(f"  - {p['nome']} ({p['place_id']})")
     if r["eventos_nao_registrados"]:
-        print(f"\n{len(r['eventos_nao_registrados'])} mudança(s) de Resultado ainda não registrada(s) -- "
-              f"rode registro_abordagens.py com esta planilha (cada uma vira uma linha nova):")
+        print(f"\n{len(r['eventos_nao_registrados'])} mudança(s) de Resultado ou de Atendimento WhatsApp ainda não "
+              f"registrada(s) -- rode registro_abordagens.py com esta planilha (cada uma vira uma linha nova):")
         for d in r["eventos_nao_registrados"]:
-            print(f"  - {d['nome']}: Resultado registro={d['no_registro'] or '(vazio)'} planilha={d['na_planilha']}")
+            print(f"  - {d['nome']}: {d['coluna']} registro={d['no_registro'] or '(vazio)'} planilha={d['na_planilha']}")
     if r["divergentes"]:
         print(f"\n{len(r['divergentes'])} diferença(s) de acompanhamento em leads já registrados "
               f"(o registro só acrescenta -- decidir com o diretor):")

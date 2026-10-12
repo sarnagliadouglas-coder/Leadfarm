@@ -144,8 +144,11 @@ def _lead_nata(
     rodadas=2, texto_site=None, fora_do_ar=False, classe_site="proprio",
     campanha_id=("psicologos-teste", "CONFIRMADO_PRESENTE"), campanha_nicho=("Psicólogos", "CONFIRMADO_PRESENTE"),
     possivel_mesmo_negocio=(None, "CONFIRMADO_AUSENTE"), priorizacao=None,
-    campanha_cidade=("Alicante", "CONFIRMADO_PRESENTE"),
+    campanha_cidade=("Alicante", "CONFIRMADO_PRESENTE"), concorda=True,
 ):
+    psi = {"estado": psi_estado, "lcp_ms": lcp_ms, "motivo": None, "medido_em": None, "rodadas": rodadas}
+    if concorda is not None:  # segunda medição do QUALIFICADOR (12/10/2026); None = lote sem o bloco
+        psi["segunda_medicao"] = {"concorda": concorda, "lcp_ms": lcp_ms, "lcp_ms_primeira": lcp_ms}
     problemas = []
     if fora_do_ar:
         problemas.append({"tipo": "fora_do_ar", "evidencia": "x", "medicao": "site_renderizado", "coletado_em": None})
@@ -173,7 +176,7 @@ def _lead_nata(
             "review_count": {"valor": avaliacoes_valor, "estado": avaliacoes_estado},
         },
         "problema_vendavel": problemas,
-        "psi": {"estado": psi_estado, "lcp_ms": lcp_ms, "motivo": None, "medido_em": None, "rodadas": rodadas},
+        "psi": psi,
         "texto_site": (
             {"estado": "CONFIRMADO_PRESENTE", "texto": texto_site, "chars_originais": len(texto_site),
              "truncado": False, "dispositivo": "mobile", "coletado_em": None}
@@ -1460,6 +1463,8 @@ _COLUNAS_CAMPANHA_ETAPA_2 = ("campanha", "nicho", "prioridade_rotulo", "priorida
 # Contrato 2.3.0 (multicidade, 06/10/2026): mais uma no fim, depois das da Etapa 2.
 _COLUNAS_2_3_0 = ("cidade_conferida",)
 _COLUNAS_NO_FIM = _COLUNAS_CAMPANHA_ETAPA_2 + _COLUNAS_2_3_0
+# "Atendimento WhatsApp" (diretor, 12/10/2026): a última, depois da cidade_conferida.
+_COLUNAS_ATENDIMENTO = ("Atendimento WhatsApp",)
 
 
 def _so_acrescentou_no_fim(atuais, antigas, novas) -> bool:
@@ -1468,10 +1473,12 @@ def _so_acrescentou_no_fim(atuais, antigas, novas) -> bool:
 
 def test_colunas_de_campanha_no_fim_das_duas_abas_sem_mexer_nas_antigas():
     assert pe.COLUNAS_CAMPANHA == _COLUNAS_NO_FIM
-    assert _so_acrescentou_no_fim(COLUNAS_GERAL, _COLUNAS_GERAL_ANTES_DA_ETAPA_2, _COLUNAS_NO_FIM)
-    assert _so_acrescentou_no_fim(COLUNAS_NATA, _COLUNAS_NATA_ANTES_DA_ETAPA_2, _COLUNAS_NO_FIM)
+    no_fim = _COLUNAS_NO_FIM + _COLUNAS_ATENDIMENTO
+    assert _so_acrescentou_no_fim(COLUNAS_GERAL, _COLUNAS_GERAL_ANTES_DA_ETAPA_2, no_fim)
+    assert _so_acrescentou_no_fim(COLUNAS_NATA, _COLUNAS_NATA_ANTES_DA_ETAPA_2, no_fim)
     assert COLUNAS_GERAL[0] == "pista" and COLUNAS_NATA[0] == "pista"
-    assert COLUNAS_GERAL[-1] == COLUNAS_NATA[-1] == "cidade_conferida"
+    assert COLUNAS_GERAL[-2] == COLUNAS_NATA[-2] == "cidade_conferida"
+    assert COLUNAS_GERAL[-1] == COLUNAS_NATA[-1] == "Atendimento WhatsApp"
     assert COLUNAS_GERAL.count("cidade") == 1  # a "cidade" do endereço continua única na Geral
 
 

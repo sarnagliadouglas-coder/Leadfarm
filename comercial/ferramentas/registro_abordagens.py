@@ -27,6 +27,11 @@ sequência de um lead (envio -> pediu exemplo -> proposta -> cliente) é a
 ordem das linhas dele no arquivo: `funil_por_lead` e o comando
 `--funil` a mostram. "Resultado" apagado na planilha não vira evento (não
 é uma mudança de etapa) -- continua listado por `pendencias_registro.py`.
+
+"Atendimento WhatsApp" (decisão do diretor, 12/10/2026) segue o mesmo
+mecanismo, com `evento` = "atendimento"; `--atendimento` é a consulta só de
+leitura (contagem por tipo, cruzada com nicho, pista e cidade, e os leads
+enviados sem o campo preenchido).
 """
 
 from __future__ import annotations
@@ -49,7 +54,7 @@ NOME_REGISTRO = "registro_abordagens.xlsx"
 
 _CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 CAMINHO_FUNIL_PADRAO = _CONFIG_DIR / "funil_planilha.json"
-_CHAVES_FUNIL_OBRIGATORIAS = ("etapa", "resultado", "mensagem", "decidi_nao_enviar")
+_CHAVES_FUNIL_OBRIGATORIAS = ("etapa", "resultado", "mensagem", "decidi_nao_enviar", "atendimento_whatsapp")
 
 # Colunas com lista de escolha (validação de dados do Excel) -- decisão do
 # diretor, 24/09/2026, quarta rodada: "registro_abordagens.xlsx passa a ser
@@ -90,10 +95,19 @@ COLUNAS_CAMPANHA_REGISTRO = (
 EVENTO_ENVIO = "envio"
 EVENTO_RESULTADO = "resultado"
 
+# "Atendimento WhatsApp" (diretor, 12/10/2026): o tipo da PRIMEIRA resposta que
+# chegou pelo WhatsApp, com lista de escolha (`atendimento_whatsapp` em
+# config/funil_planilha.json). Última coluna das abas Geral e Nata e do
+# registro. Mesmo mecanismo do Resultado: preencher ou mudar o valor vira uma
+# linha nova com `evento` = "atendimento"; o mesmo valor de novo não grava
+# nada; valor apagado não vira evento (pendencias_registro.py o lista).
+COLUNA_ATENDIMENTO = "Atendimento WhatsApp"
+EVENTO_ATENDIMENTO = "atendimento"
+
 COLUNAS_REGISTRO = (
     "place_id", "nome", "telefone", "aba_origem", "enviado_em",
     "canal", "modelo", "custo_usd", "registrado_em",
-) + COLUNAS_FUNIL + ("angulo", "variante") + COLUNAS_CAMPANHA_REGISTRO + ("evento",)
+) + COLUNAS_FUNIL + ("angulo", "variante") + COLUNAS_CAMPANHA_REGISTRO + ("evento", COLUNA_ATENDIMENTO)
 
 
 class ConfigFunilInvalidaError(Exception):
@@ -132,13 +146,17 @@ def aplicar_validacao_lista(ws, colunas: tuple, nome_coluna: str, opcoes: list, 
 
 
 def aplicar_validacoes_funil(ws, colunas: tuple, opcoes_funil: dict, ultima_linha: int) -> None:
-    """As quatro colunas do funil com lista de escolha -- "Motivo da edição"
-    e "Motivo de não enviar" são texto livre, sem validação."""
+    """As quatro colunas do funil e "Atendimento WhatsApp" com lista de
+    escolha -- "Motivo da edição" e "Motivo de não enviar" são texto livre,
+    sem validação."""
     aplicar_validacao_lista(ws, colunas, "Etapa", opcoes_funil.get("etapa", []), ultima_linha)
     aplicar_validacao_lista(ws, colunas, "Resultado", opcoes_funil.get("resultado", []), ultima_linha)
     aplicar_validacao_lista(ws, colunas, "Enviada como", opcoes_funil.get("mensagem", []), ultima_linha)
     aplicar_validacao_lista(
         ws, colunas, "Decidi não enviar", opcoes_funil.get("decidi_nao_enviar", []), ultima_linha
+    )
+    aplicar_validacao_lista(
+        ws, colunas, COLUNA_ATENDIMENTO, opcoes_funil.get("atendimento_whatsapp", []), ultima_linha
     )
 
 
@@ -251,6 +269,7 @@ def _linhas_enviadas(caminho_planilha: Path) -> list:
                     "angulo": _valor(linha, "Ângulo") or "",
                     "variante": _valor(linha, "Variante") or "",
                     **{c: _valor(linha, c) or "" for c in COLUNAS_CAMPANHA_REGISTRO},
+                    "atendimento": _valor(linha, COLUNA_ATENDIMENTO) or "",
                 })
 
         if erros:
@@ -304,6 +323,67 @@ def ultimo_resultado(linhas_do_lead: list) -> str:
     return _texto(linhas_do_lead[-1].get("Resultado")) if linhas_do_lead else ""
 
 
+def ultimo_atendimento(linhas_do_lead: list) -> str:
+    """O "Atendimento WhatsApp" mais recente gravado para o lead: o da última
+    linha que o tem preenchido (linha anterior à coluna, ou de um evento de
+    Resultado gravado com o campo vazio na planilha, não apaga o valor). Nenhum
+    = ""."""
+    for linha in reversed(linhas_do_lead):
+        valor = _texto(linha.get(COLUNA_ATENDIMENTO))
+        if valor:
+            return valor
+    return ""
+
+
+SEM_ATENDIMENTO = "(sem o campo preenchido)"
+DIMENSOES_ATENDIMENTO = (("nicho", "nicho"), ("pista", "pista"), ("cidade", "cidade_conferida"))
+
+
+def resumo_atendimento(caminho: Optional[Path] = None, valores: tuple = ()) -> dict:
+    """Consulta do "Atendimento WhatsApp" (só leitura). Universo: os leads
+    ENVIADOS do registro (primeira linha com `enviado_em`; "Decidi não
+    enviar" sem envio fica de fora). Devolve `{"total", "por_tipo",
+    "por_<dimensão>": {valor_da_dimensão: {tipo: n}}, "sem_campo": [(nome,
+    place_id)]}`; tipo de lead sem valor = `SEM_ATENDIMENTO`. Nicho, pista e
+    cidade (a conferida) vêm da primeira linha do lead."""
+    caminho = Path(caminho) if caminho else caminho_registro()
+    tipos = tuple(valores) + (SEM_ATENDIMENTO,)
+    resumo = {"total": 0, "por_tipo": {t: 0 for t in tipos}, "sem_campo": []}
+    for nome_dim, _ in DIMENSOES_ATENDIMENTO:
+        resumo[f"por_{nome_dim}"] = {}
+    for place_id, linhas in _linhas_por_lead(caminho).items():
+        primeira = linhas[0]
+        if not _texto(primeira.get("enviado_em")):
+            continue
+        tipo = ultimo_atendimento(linhas) or SEM_ATENDIMENTO
+        resumo["total"] += 1
+        resumo["por_tipo"][tipo] = resumo["por_tipo"].get(tipo, 0) + 1
+        if tipo == SEM_ATENDIMENTO:
+            resumo["sem_campo"].append((_texto(primeira.get("nome")), place_id))
+        for nome_dim, coluna in DIMENSOES_ATENDIMENTO:
+            chave = _texto(primeira.get(coluna)) or "(vazio)"
+            grupo = resumo[f"por_{nome_dim}"].setdefault(chave, {})
+            grupo[tipo] = grupo.get(tipo, 0) + 1
+    return resumo
+
+
+def imprimir_atendimento(resumo: dict) -> int:
+    """Texto do comando `--atendimento` (só leitura)."""
+    print(f"Atendimento WhatsApp -- leads enviados no registro: {resumo['total']}")
+    for tipo, n in resumo["por_tipo"].items():
+        print(f"  {tipo}: {n}")
+    for nome_dim, _ in DIMENSOES_ATENDIMENTO:
+        print(f"\nPor {nome_dim}:")
+        for chave, grupo in sorted(resumo[f"por_{nome_dim}"].items()):
+            partes = [f"{t} {n}" for t, n in grupo.items() if n]
+            print(f"  {chave}: " + ", ".join(partes))
+    if resumo["sem_campo"]:
+        print(f"\nSem o campo preenchido ({len(resumo['sem_campo'])}):")
+        for nome, place_id in resumo["sem_campo"]:
+            print(f"  - {nome or '(sem nome)'} [{place_id}]")
+    return 0
+
+
 def funil_por_lead(caminho: Optional[Path] = None) -> dict:
     """`{place_id: {"nome", "passos": [{"evento", "registrado_em", "enviado_em",
     "resultado"}, ...]}}` -- a sequência de cada lead, na ordem do registro.
@@ -319,6 +399,7 @@ def funil_por_lead(caminho: Optional[Path] = None) -> dict:
                     "registrado_em": _texto(linha.get("registrado_em")),
                     "enviado_em": _texto(linha.get("enviado_em")),
                     "resultado": _texto(linha.get("Resultado")),
+                    "atendimento": _texto(linha.get(COLUNA_ATENDIMENTO)),
                 }
                 for linha in linhas
             ],
@@ -373,12 +454,15 @@ def registrar_envios(
     caminho_planilha: Path, *, diretorio_registro: Optional[Path] = None, agora=None,
     opcoes_funil: Optional[dict] = None,
 ) -> dict:
-    """Devolve `{"acrescentados", "eventos", "ja_existentes", "backup"}`.
+    """Devolve `{"acrescentados", "eventos", "eventos_resultado",
+    "eventos_atendimento", "ja_existentes", "backup"}`.
     Um lead novo entra uma vez (`evento` = "envio"); um lead já registrado
     cujo "Resultado" na planilha está preenchido e difere do último gravado
-    para ele ganha UMA linha nova (`evento` = "resultado") -- contada em
-    `eventos` (funil por eventos, diretor, 08/10/2026). Lead já registrado
-    sem mudança de Resultado só é contado em `ja_existentes`. NUNCA altera
+    para ele ganha UMA linha nova (`evento` = "resultado") -- funil por
+    eventos, diretor, 08/10/2026. O mesmo vale para "Atendimento WhatsApp"
+    (`evento` = "atendimento", diretor, 12/10/2026); se os dois mudaram, são
+    duas linhas, resultado e depois atendimento. Lead já registrado sem
+    mudança só é contado em `ja_existentes`. NUNCA altera
     uma linha já existente -- só acrescenta (decisão do diretor, 24/09/2026,
     quarta rodada). `opcoes_funil` omitido carrega
     `config/funil_planilha.json`."""
@@ -390,6 +474,7 @@ def registrar_envios(
     por_lead = _linhas_por_lead(caminho_reg)
 
     novas, eventos, com_envio, com_evento = [], [], set(), set()
+    sem_mudanca = 0
     for e in enviadas:
         pid = e["place_id"]
         if not pid:
@@ -398,16 +483,36 @@ def registrar_envios(
             if pid not in com_envio:  # o mesmo lead novo em duas abas: um envio só, a primeira aba
                 com_envio.add(pid)
                 novas.append({**e, "evento": EVENTO_ENVIO})
-        elif (
-            pid not in com_evento  # o mesmo lead em duas abas gera um evento só
-            and _texto(e["resultado"]) and _texto(e["resultado"]) != ultimo_resultado(por_lead[pid])
-        ):
+            else:
+                sem_mudanca += 1
+            continue
+        if pid in com_evento:  # o mesmo lead em duas abas gera os eventos uma vez só
+            sem_mudanca += 1
+            continue
+        resultado, atendimento = _texto(e["resultado"]), _texto(e["atendimento"])
+        anterior_atendimento = ultimo_atendimento(por_lead[pid])
+        muda_resultado = bool(resultado) and resultado != ultimo_resultado(por_lead[pid])
+        muda_atendimento = bool(atendimento) and atendimento != anterior_atendimento
+        if muda_resultado:
+            # cada linha registra UMA mudança: se o atendimento também mudou, ele
+            # entra na linha seguinte, a do evento "atendimento"
+            eventos.append({**e, "atendimento": anterior_atendimento if muda_atendimento else e["atendimento"],
+                            "evento": EVENTO_RESULTADO})
+        if muda_atendimento:
+            eventos.append({**e, "evento": EVENTO_ATENDIMENTO})
+        if muda_resultado or muda_atendimento:
             com_evento.add(pid)
-            eventos.append({**e, "evento": EVENTO_RESULTADO})
-    ja_existentes = len(enviadas) - len(novas) - len(eventos)
+        else:
+            sem_mudanca += 1
+    ja_existentes = sem_mudanca
 
+    contagem_eventos = {
+        "eventos": len(eventos),
+        "eventos_resultado": sum(1 for e in eventos if e["evento"] == EVENTO_RESULTADO),
+        "eventos_atendimento": sum(1 for e in eventos if e["evento"] == EVENTO_ATENDIMENTO),
+    }
     if not novas and not eventos:
-        return {"acrescentados": 0, "eventos": 0, "ja_existentes": ja_existentes, "backup": None}
+        return {"acrescentados": 0, **contagem_eventos, "ja_existentes": ja_existentes, "backup": None}
 
     backup = _fazer_backup(caminho_reg)
 
@@ -433,6 +538,7 @@ def registrar_envios(
                 "Motivo de não enviar": e["motivo_nao_enviar"], "angulo": e["angulo"], "variante": e["variante"],
                 **{c: e[c] for c in COLUNAS_CAMPANHA_REGISTRO},
                 "evento": e["evento"],
+                COLUNA_ATENDIMENTO: e["atendimento"],
             }
             ws.append([valores.get(c, "") for c in cabecalho])
 
@@ -447,7 +553,7 @@ def registrar_envios(
             f"registro, e a planilha de envio não foi tocada. Feche o arquivo e rode de novo."
         ) from exc
 
-    return {"acrescentados": len(novas), "eventos": len(eventos), "ja_existentes": ja_existentes, "backup": backup}
+    return {"acrescentados": len(novas), **contagem_eventos, "ja_existentes": ja_existentes, "backup": backup}
 
 
 def _data(iso: str) -> str:
@@ -468,6 +574,8 @@ def imprimir_funil(funil: dict, resultados: tuple, place_id: Optional[str] = Non
             if p["evento"] == EVENTO_ENVIO:
                 passos.append(f"{_data(p['enviado_em'] or p['registrado_em'])} envio"
                               + (f" ({p['resultado']})" if p["resultado"] else ""))
+            elif p["evento"] == EVENTO_ATENDIMENTO:
+                passos.append(f"{_data(p['registrado_em'])} atendimento: {p['atendimento']}")
             else:
                 passos.append(f"{_data(p['registrado_em'])} {p['resultado']}")
         print(f"{lead['nome'] or '(sem nome)'} [{pid}]: " + " -> ".join(passos))
@@ -488,8 +596,13 @@ def main(argv: Optional[list] = None) -> int:
     ap.add_argument("planilha", nargs="?", type=Path, help="Caminho da planilha de envio preenchida pelo diretor.")
     ap.add_argument("--funil", action="store_true", help="Só leitura: mostra a sequência de Resultado de cada lead.")
     ap.add_argument("--place-id", default=None, help="Com --funil: só este lead.")
+    ap.add_argument("--atendimento", action="store_true",
+                    help="Só leitura: contagem do Atendimento WhatsApp por tipo, nicho, pista e cidade.")
     args = ap.parse_args(argv)
 
+    if args.atendimento:
+        valores = tuple(carregar_opcoes_funil()["atendimento_whatsapp"])
+        return imprimir_atendimento(resumo_atendimento(valores=valores))
     if args.funil:
         resultados = tuple(carregar_opcoes_funil()["resultado"])
         return imprimir_funil(funil_por_lead(), resultados, args.place_id)
@@ -500,7 +613,8 @@ def main(argv: Optional[list] = None) -> int:
 
     print(
         f"OK: {resultado['acrescentados']} envio(s) registrado(s), "
-        f"{resultado['eventos']} mudança(s) de Resultado registrada(s) como evento, "
+        f"{resultado['eventos_resultado']} mudança(s) de Resultado e "
+        f"{resultado['eventos_atendimento']} de Atendimento WhatsApp registrada(s) como evento, "
         f"{resultado['ja_existentes']} já existente(s) sem mudança."
     )
     return 0

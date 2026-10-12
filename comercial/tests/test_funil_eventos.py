@@ -129,7 +129,7 @@ def test_registro_anterior_ao_funil_ganha_a_coluna_e_conta_a_linha_antiga_como_e
     a coluna entra no FIM e a linha antiga conta como envio."""
     diretorio = tmp_path / "_abordagens"
     diretorio.mkdir()
-    cabecalho_antigo = list(ra.COLUNAS_REGISTRO[:-1])
+    cabecalho_antigo = list(ra.COLUNAS_REGISTRO[: ra.COLUNAS_REGISTRO.index("evento")])
     wb = Workbook()
     wb.active.append(cabecalho_antigo)
     antiga = {c: "" for c in cabecalho_antigo}
@@ -141,7 +141,7 @@ def test_registro_anterior_ao_funil_ganha_a_coluna_e_conta_a_linha_antiga_como_e
     r = _registrar(tmp_path, _planilha(tmp_path / "b.xlsx", [_lead(Resultado="pediu exemplo")]), 12)
     assert r["eventos"] == 1
     linhas = _linhas_do_registro(tmp_path)
-    assert list(linhas[0])[-1] == "evento"
+    assert list(linhas[0])[-2:] == ["evento", ra.COLUNA_ATENDIMENTO]
     assert linhas[0]["evento"] is None and linhas[1]["evento"] == "resultado"
     funil = ra.funil_por_lead(ra.caminho_registro(diretorio))
     assert [(p["evento"], p["resultado"]) for p in funil["p1"]["passos"]] == [

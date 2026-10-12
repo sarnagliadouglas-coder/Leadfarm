@@ -46,6 +46,13 @@ PSI_MAX_RUNTIME_SECONDS = 1800      # guarda dura, mesmo papel do max_runtime_se
 # deles já na 1ª chamada, sem nem precisar do retry interno. Vale reagendar entre rodadas, mas
 # com teto: sem ele, um site permanentemente quebrado queima quota em toda rodada, pra sempre.
 PSI_MAX_RODADAS_POR_LEAD = 3
+# Segunda medição (decisão do diretor, 12/10/2026): só o site cuja medição válida deu LCP >= este
+# limiar é medido uma segunda vez. Concordância = as duas medições CONFIRMADO_PRESENTE e as duas
+# >= o limiar; aí 'lcp_ms' passa a ser o MENOR dos dois (o número que vale para as duas). Sem
+# concordância, 'lcp_ms' fica com a medição válida mais recente. Detalhe em psi['segunda_medicao'].
+# Mesmo valor de lentidao.lcp_minimo_ms do COMERCIAL (config/angulo_regras.json), que só cita o
+# número quando segunda_medicao.concorda é true.
+PSI_LIMIAR_SEGUNDA_MEDICAO_MS = 10000
 
 # --- Fase de renderização (Etapa C, passo C4) ---------------------------------------------
 # ~1 min por site (estimativa, ainda não medida -- passo C5): grava a CADA lead medido, para que
@@ -759,20 +766,72 @@ def _psi_reagendavel(registro, max_rodadas):
     return _psi_rodadas(registro) < max_rodadas
 
 
+def _precisa_segunda_medicao(registro, max_rodadas):
+    """Medição válida com LCP >= PSI_LIMIAR_SEGUNDA_MEDICAO_MS e ainda sem segunda medição. A
+    segunda que falhou por causa transiente volta pra fila, com o mesmo teto de rodadas (contado
+    só nas tentativas da segunda); falha permanente não volta."""
+    psi = registro.get("psi") or {}
+    if psi.get("estado") != psi_client.CONFIRMADO_PRESENTE:
+        return False
+    lcp_ms = psi.get("lcp_ms")
+    if not isinstance(lcp_ms, (int, float)) or lcp_ms < PSI_LIMIAR_SEGUNDA_MEDICAO_MS:
+        return False
+    segunda = psi.get("segunda_medicao")
+    if not segunda:
+        return True
+    if segunda.get("estado") != psi_client.NAO_VERIFICADO or not segunda.get("falha_transiente"):
+        return False
+    return segunda.get("rodadas", 1) < max_rodadas
+
+
 def _selecionar_lote_psi(leads, batch_size, max_rodadas):
-    """Mesmo padrão do _selecionar_lote_wave2: prioriza quem nunca foi medido antes de quem é
-    retry, e nunca inclui quem já esgotou as rodadas nem quem já tem medição boa."""
+    """Mesmo padrão do _selecionar_lote_wave2: prioriza quem nunca foi medido, depois quem é
+    retry, por último a segunda medição dos lentos; nunca inclui quem já esgotou as rodadas nem
+    quem já tem medição boa (salvo a segunda medição, uma vez)."""
     analisados = [l for l in leads if l.get("status") == "analyzed"]
     fila_nova = [l for l in analisados if not l.get("psi")]
     fila_retry = [l for l in analisados if l.get("psi") and _psi_reagendavel(l, max_rodadas)]
-    fila = fila_nova + fila_retry
+    fila_segunda = [l for l in analisados if _precisa_segunda_medicao(l, max_rodadas)]
+    fila = fila_nova + fila_retry + fila_segunda
     return fila if batch_size is None else fila[:batch_size]
+
+
+def _com_segunda_medicao(psi_anterior, segunda):
+    """Junta a segunda medição ao bloco da primeira. Concordância: as duas CONFIRMADO_PRESENTE e
+    as duas >= PSI_LIMIAR_SEGUNDA_MEDICAO_MS -> 'lcp_ms' = o menor dos dois. Segunda válida sem
+    concordância -> 'lcp_ms' = a segunda (a medição válida mais recente). Segunda falhou -> a
+    primeira fica como está e 'concorda' é false."""
+    bloco = dict(psi_anterior)
+    anterior = psi_anterior.get("segunda_medicao") or {}
+    lcp_primeira = anterior.get("lcp_ms_primeira", psi_anterior["lcp_ms"])
+    lcp_segunda = segunda.get("lcp_ms")
+    valida = (segunda.get("estado") == psi_client.CONFIRMADO_PRESENTE
+              and isinstance(lcp_segunda, (int, float)))
+    concorda = valida and lcp_segunda >= PSI_LIMIAR_SEGUNDA_MEDICAO_MS
+    if concorda:
+        bloco["lcp_ms"] = min(lcp_primeira, lcp_segunda)
+    elif valida:
+        bloco["lcp_ms"] = lcp_segunda
+    bloco["segunda_medicao"] = {
+        "estado": segunda.get("estado"),
+        "motivo": segunda.get("motivo"),
+        "medido_em": segunda.get("medido_em"),
+        "lcp_ms": lcp_segunda,
+        "lcp_ms_primeira": lcp_primeira,
+        "limiar_ms": PSI_LIMIAR_SEGUNDA_MEDICAO_MS,
+        "concorda": concorda,
+        "falha_transiente": segunda.get("falha_transiente", False),
+        "tentativas": segunda.get("tentativas"),
+        "rodadas": anterior.get("rodadas", 0) + 1,
+    }
+    return bloco
 
 
 def fase_psi():
     """PSI (PageSpeed Insights), fase própria DEPOIS de fase_wave2. Só leads com site analisado
     (status 'analyzed'): os que nunca foram medidos, mais os que falharam por causa transiente e
-    ainda têm rodada disponível (ver _selecionar_lote_psi). Isolada de propósito:
+    ainda têm rodada disponível, mais a segunda medição dos que deram LCP >= 10 s (ver
+    _selecionar_lote_psi e _com_segunda_medicao). Isolada de propósito:
     website_analyzer/wave2_scoring continuam puros, offline e $0. Sem PSI_ENABLED/PSI_API_KEY,
     degrada -- não grava nada e a saída marca os campos de PSI como NAO_VERIFICADO. O
     performance_score NÃO entra no priority_score: vai cru pro output (Sistema 2 decide o peso
@@ -809,17 +868,25 @@ def fase_psi():
         emp = item["dados_empresa"]
         url = emp.get("website")
         rodadas_anteriores = _psi_rodadas(item)
-        print(f"[PSI] [{idx}/{len(alvos)}] {emp.get('nome', 'Empresa')} ({url})...")
-        resultado = psi_client.medir(url)
+        e_segunda = _precisa_segunda_medicao(item, PSI_MAX_RODADAS_POR_LEAD)
+        print(f"[PSI] [{idx}/{len(alvos)}] {emp.get('nome', 'Empresa')} ({url})"
+              + (" -- segunda medição" if e_segunda else "") + "...")
+        medicao = psi_client.medir(url)
+        resultado = _com_segunda_medicao(item["psi"], medicao) if e_segunda else medicao
         # 'tentativas' (do psi_client) conta chamadas DENTRO de uma medição; 'rodadas' conta
         # quantas vezes esta fase já voltou neste lead. São coisas diferentes: o teto entre
         # rodadas é o que impede um site quebrado de queimar quota pra sempre.
         resultado["rodadas"] = rodadas_anteriores + 1
         leads[indice_por_chave[chave_dedup(emp)]]["psi"] = resultado
         medidos += 1
-        print(f"[PSI]   -> {resultado['estado']}"
-              + (f" perf={resultado['performance_score']}" if resultado.get("performance_score") is not None else "")
-              + f" (rodada {resultado['rodadas']}/{PSI_MAX_RODADAS_POR_LEAD})")
+        if e_segunda:
+            segunda = resultado["segunda_medicao"]
+            print(f"[PSI]   -> segunda: {segunda['estado']} lcp_ms={segunda['lcp_ms']} "
+                  f"(primeira {segunda['lcp_ms_primeira']}) concorda={segunda['concorda']}")
+        else:
+            print(f"[PSI]   -> {resultado['estado']}"
+                  + (f" perf={resultado['performance_score']}" if resultado.get("performance_score") is not None else "")
+                  + f" (rodada {resultado['rodadas']}/{PSI_MAX_RODADAS_POR_LEAD})")
         if medidos % CHECKPOINT_WAVE2_A_CADA == 0:
             salvar_json(PATH_COM_SITE, leads)
             print(f"[PSI]   💾 checkpoint: {medidos} medição(ões) em disco.")

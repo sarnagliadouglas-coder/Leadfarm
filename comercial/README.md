@@ -24,8 +24,10 @@ JSON hand-off + human CSV from the QUALIFICADOR
 
 - **Leads with their own website:** the first angle the lead fits, in this order — a
   template e-mail address left on the site, a phone number that cannot be tapped on a
-  phone, or a slow site on mobile (Google's speed test, at least 10 seconds, measured
-  twice). No angle, no message. Other angles (few reviews, moderately slow, slow measured
+  phone (not used when the site has a WhatsApp link), or a slow site on mobile (Google's
+  speed test: the QUALIFICADOR measures a second time every site that took 10 seconds or
+  more; both measurements must reach 10 seconds, and the message quotes the lower one). No
+  angle, no message. Other angles (few reviews, moderately slow, slow measured
   only once) exist in the templates but are switched off in `config/angulo_regras.json`.
 - **Leads without their own website** (none, a directory portal, a social network, a
   free site builder): one template per situation; the "no website" text depends on the
@@ -55,6 +57,9 @@ python ferramentas/pendencias_registro.py "<filled-in sheet>"
 # the funnel of each lead, from the log (read-only)
 python ferramentas/registro_abordagens.py --funil
 python ferramentas/registro_abordagens.py --funil --place-id "<place_id>"
+
+# how leads answer on WhatsApp, by type, niche, track and city (read-only)
+python ferramentas/registro_abordagens.py --atendimento
 ```
 
 The contact log only ever appends. The first row of a lead is its send (`evento` =
@@ -64,6 +69,13 @@ The contact log only ever appends. The first row of a lead is its send (`evento`
 moment the change happened. A lead that is new in two tabs of the same sheet is logged once.
 Running it again with the same result adds nothing. `--funil` prints each lead's sequence and how many leads reached each
 result; it never writes.
+
+The last column of both tabs, "Atendimento WhatsApp", records how the lead's WhatsApp
+answered first (pick list: *humano*, *auto-resposta simples*, *menu/bot*, *agente IA*,
+*sem resposta (48h)*; the "Como usar" tab defines each one). Filling it in or changing it
+works like "Resultado": a new log row (`evento` = `atendimento`); the same value again adds
+nothing. `--atendimento` counts the sent leads by type, crossed with niche, track and city,
+and lists those still without a value; it never writes.
 
 The contract location is resolved automatically; optional variables are listed in
 [`.env.example`](.env.example).
